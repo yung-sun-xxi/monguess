@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Guesser</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section id="menu" class="screen">
+    <h1>🌍 World Guesser</h1>
+    <p class="sub">Все страны мира. Угадай, где ты.</p>
+
+    <div id="challenge-note" class="note" hidden></div>
+
+    <div id="options">
+      <label>Раундов
+        <select id="rounds">
+          <option>3</option>
+          <option selected>5</option>
+          <option>10</option>
+        </select>
+      </label>
+      <label>Снимки
+        <select id="source"></select>
+      </label>
+    </div>
+
+    <button id="start" class="primary">Новая игра</button>
+    <button id="new-instead" class="link" hidden>или начать свою игру</button>
+    <p id="menu-error" class="error"></p>
+  </section>
+
+  <section id="loading" class="screen" hidden>
+    <div class="spinner"></div>
+    <p id="loading-text"></p>
+  </section>
+
+  <section id="game" hidden>
+    <div id="pano"></div>
+    <div id="hud"><span id="hud-round"></span><span id="hud-score"></span></div>
+    <div id="guess-box">
+      <div id="guess-map"></div>
+      <button id="guess" class="primary" disabled>Угадать</button>
+    </div>
+  </section>
+
+  <section id="result" hidden>
+    <div id="result-map"></div>
+    <div id="result-panel" class="panel">
+      <div id="result-country"></div>
+      <div id="result-distance"></div>
+      <div id="result-points"></div>
+      <button id="next" class="primary"></button>
+    </div>
+  </section>
+
+  <section id="final" class="screen" hidden>
+    <h1 id="final-total"></h1>
+    <table id="final-table"></table>
+    <div class="buttons">
+      <button id="copy-link" class="primary">Ссылка для друзей — те же места</button>
+      <button id="copy-result">Скопировать результат</button>
+      <button id="again">Новая игра</button>
+    </div>
+    <p id="copied" class="note" hidden></p>
+  </section>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
