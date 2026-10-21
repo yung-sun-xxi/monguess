@@ -24,6 +24,9 @@ authority to merge; CI (`.github/workflows/ci.yml`) runs the same script on Ubun
 - `scripts/deploy.sh` publishes to Cloudflare Pages project `monguess`
   (https://monguess.pages.dev) and refuses anything but a clean `master` that matches
   `origin/master`. Keychain: `monguess-cloudflare`, `monguess-cloudflare-account`.
+- After every update, open the game in Safari for the owner without being asked: after a
+  deploy, `open -a Safari https://monguess.pages.dev`; when a change waits on his by-eye
+  "ok" before merge, serve the branch on port 8765 and `open -a Safari http://localhost:8765`.
 
 ## Identifiers
 
