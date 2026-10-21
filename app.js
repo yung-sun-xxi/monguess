@@ -95,13 +95,15 @@ window.gm_authFailure = () => fail('Google не принял ключ. Пров�
 const GOOGLE_RADIUS_M = 3000;
 
 let streetViewService = null;
-async function googlePanoAt(lat, lon, source) {
+async function googlePanoAt(lat, lon, source, needLinks) {
   try {
     const { data } = await streetViewService.getPanorama({
       location: { lat, lng: lon },
       radius: GOOGLE_RADIUS_M,
       sources: [source],
     });
+    // У одиночной фотосферы нет соседних точек: по ней можно только крутиться, но не ходить.
+    if (needLinks && !data.links?.length) return null;
     const found = { src: 'g', id: data.location.pano, lat: data.location.latLng.lat(), lon: data.location.latLng.lng() };
     // Google иногда отдаёт панораму на другом конце света (из Кубы — в Аргентину), такие отбрасываем.
     return distanceKm({ lat, lon }, found) * 1000 <= GOOGLE_RADIUS_M * 1.5 ? found : null;
@@ -112,11 +114,13 @@ async function googlePanoAt(lat, lon, source) {
 
 // Сначала съёмка самого Google, и только если её нет — фотосферы людей:
 // без этого даже в Японии попадаются фотосферы баров вместо улиц.
-async function tryGoogle(lat, lon) {
+// spheres: 'off' — без фотосфер, 'walk' — только те, где есть соседние точки, 'any' — любые.
+async function tryGoogle(lat, lon, spheres) {
   streetViewService ??= new google.maps.StreetViewService();
-  return (await googlePanoAt(lat, lon, google.maps.StreetViewSource.GOOGLE))
-    // OUTDOOR: панорамы Google и уличные фотосферы людей, без съёмки внутри зданий.
-    || googlePanoAt(lat, lon, google.maps.StreetViewSource.OUTDOOR);
+  const own = await googlePanoAt(lat, lon, google.maps.StreetViewSource.GOOGLE, false);
+  if (own || spheres === 'off') return own;
+  // OUTDOOR: панорамы Google и уличные фотосферы людей, без съёмки внутри зданий.
+  return googlePanoAt(lat, lon, google.maps.StreetViewSource.OUTDOOR, spheres === 'walk');
 }
 
 async function tryMapillary(lat, lon) {
@@ -146,9 +150,9 @@ async function tryMapillary(lat, lon) {
   return { src: 'm', id: String(img.id), lat: ilat, lon: ilon };
 }
 
-async function findAt([lat, lon], sources) {
+async function findAt([lat, lon], sources, spheres) {
   for (const s of sources) {
-    const found = s === 'g' ? await tryGoogle(lat, lon) : await tryMapillary(lat, lon);
+    const found = s === 'g' ? await tryGoogle(lat, lon, spheres) : await tryMapillary(lat, lon);
     if (found) return found;
   }
   return null;
@@ -184,7 +188,7 @@ function resolveCountry(target, found) {
 }
 
 // Каждый раунд — новая страна, страны выбираются равновероятно.
-async function generateRounds(count, sources, onProgress) {
+async function generateRounds(count, sources, spheres, onProgress) {
   const rounds = [];
   const usedCountries = new Set();
   for (const cc of shuffle(Object.keys(places))) {
@@ -194,7 +198,7 @@ async function generateRounds(count, sources, onProgress) {
     let found = null;
     for (let b = 0; b < BATCHES_PER_COUNTRY && !found; b++) {
       const points = Array.from({ length: POINTS_PER_BATCH }, () => randomPointNear(places[cc]));
-      found = (await Promise.all(points.map((p) => findAt(p, sources)))).find(Boolean) || null;
+      found = (await Promise.all(points.map((p) => findAt(p, sources, spheres)))).find(Boolean) || null;
     }
     if (!found) continue;
     found.cc = resolveCountry(cc, await countryAt(found.lat, found.lon));
@@ -365,6 +369,10 @@ function fillSourceSelect() {
   if (have.includes('g')) options.push(['g', 'Только Google']);
   if (have.includes('m')) options.push(['m', 'Только Mapillary']);
   $('source').innerHTML = options.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  // Фотосферы бывают только у Google.
+  const syncSpheres = () => { $('spheres-label').hidden = !$('source').value.includes('g'); };
+  $('source').onchange = syncSpheres;
+  syncSpheres();
 }
 
 async function play(rounds) {
@@ -390,7 +398,7 @@ async function newGame() {
   try {
     if (sources.includes('g') && !(await loadGoogle())) throw new Error('Не удалось загрузить Google Maps.');
     const count = Number($('rounds').value);
-    const rounds = await generateRounds(count, sources, (n, of) => {
+    const rounds = await generateRounds(count, sources, $('spheres').value, (n, of) => {
       $('loading-text').textContent = `Ищу место ${n} из ${of}…`;
     });
     history.replaceState(null, '', location.pathname);
