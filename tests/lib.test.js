@@ -247,3 +247,16 @@ test('buildLogRecord: errors are carried through, extra fields are dropped', () 
   assert.deepEqual(Object.keys(rec.guesses[0]), ['lat', 'lon', 'km', 'points']);
   assert.deepEqual(MG.buildLogRecord({ ...LOG_GAME, errors: undefined }).errors, []);
 });
+
+const NAME_REQUIRED = 'Введите имя, чтобы начать игру.';
+
+test('nameError: a name is required before a game starts', () => {
+  assert.equal(MG.nameError('Саша'), '');
+  assert.equal(MG.nameError('  Саша '), '');
+  // Over-long is fine: cleanName cuts it to 20.
+  assert.equal(MG.nameError('a'.repeat(25)), '');
+  assert.equal(MG.nameError(''), NAME_REQUIRED);
+  assert.equal(MG.nameError('   \t\n '), NAME_REQUIRED);
+  assert.equal(MG.nameError(null), NAME_REQUIRED);
+  assert.equal(MG.nameError(undefined), NAME_REQUIRED);
+});

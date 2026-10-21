@@ -4,7 +4,7 @@ const CFG = window.MG_CONFIG || {};
 // Чистые функции (очки, расстояния, ссылка для друзей) живут в lib.js: их проверяют тесты.
 const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, formatKm,
-  resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult, buildLogRecord,
+  resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
@@ -379,7 +379,20 @@ function setupPlayerName() {
   try { input.value = cleanName(localStorage.getItem(NAME_KEY)); } catch { /* хранилище недоступно */ }
   input.addEventListener('input', () => {
     try { localStorage.setItem(NAME_KEY, cleanName(input.value)); } catch { /* хранилище недоступно */ }
+    // Стираем только своё сообщение: ошибку битой ссылки и прочие оставляем.
+    input.classList.remove('invalid');
+    if ($('menu-error').textContent === nameError('')) $('menu-error').textContent = '';
   });
+}
+
+// Без имени игра не начинается — ни новая, ни по ссылке друга.
+function nameMissing() {
+  const message = nameError($('player-name').value);
+  if (!message) return false;
+  $('menu-error').textContent = message;
+  $('player-name').classList.add('invalid');
+  $('player-name').focus();
+  return true;
 }
 
 // ---------- Запуск ----------
@@ -492,6 +505,7 @@ async function init() {
   }
 
   $('start').onclick = () => {
+    if (nameMissing()) return;
     if (challenge && location.hash.startsWith('#c=')) playChallenge(challenge);
     else newGame();
   };
