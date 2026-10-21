@@ -148,3 +148,102 @@ test('formatResult: whitespace only is no name, an over-long name is cut to 20',
   assert.equal(MG.formatResult({ ...RESULT_GAME, name: 'Александр Степаненков' }),
     '🌍 MonGuess · Александр Степаненко: 18 400 из 25 000' + RESULT_TAIL);
 });
+
+// ---------- buildLogRecord: the record app.js posts to /api/log ----------
+
+const LOG_ROUNDS = [
+  { src: 'g', id: 'CAoSLEFGMVFpcE', lat: 41.3851, lon: 2.1734, cc: 'ES', kind: 'google' },
+  { src: 'g', id: 'AF1QipNx', lat: -1.29, lon: 36.82, cc: 'KE', kind: 'sphere' },
+  { src: 'm', id: '1234567890', lat: -33.9, lon: 151.2, cc: 'AU', kind: 'mapillary' },
+];
+const LOG_GUESSES = [
+  { lat: 40.4168, lon: -3.7038, km: 505.1, points: 3561 },
+  { lat: -1.3, lon: 36.8, km: 2.4, points: 4992 },
+  { lat: -37.8, lon: 144.9, km: 713.6, points: 3092 },
+];
+const LOG_GAME = {
+  id: 'abc123def456', startedAt: 1760000000000, buildMs: 12345, name: 'Саша',
+  settings: { sources: ['g', 'm'], spheres: 'walk', rounds: 3 }, challenge: false,
+  rounds: LOG_ROUNDS, guesses: LOG_GUESSES, errors: [],
+};
+
+test('buildLogRecord: a finished game with a name, every field', () => {
+  assert.deepEqual(MG.buildLogRecord({ ...LOG_GAME }), {
+    v: 1,
+    id: 'abc123def456',
+    startedAt: 1760000000000,
+    buildMs: 12345,
+    name: 'Саша',
+    settings: { sources: ['g', 'm'], spheres: 'walk', rounds: 3 },
+    challenge: false,
+    rounds: [
+      { src: 'g', id: 'CAoSLEFGMVFpcE', cc: 'ES', lat: 41.3851, lon: 2.1734, kind: 'google' },
+      { src: 'g', id: 'AF1QipNx', cc: 'KE', lat: -1.29, lon: 36.82, kind: 'sphere' },
+      { src: 'm', id: '1234567890', cc: 'AU', lat: -33.9, lon: 151.2, kind: 'mapillary' },
+    ],
+    guesses: [
+      { lat: 40.4168, lon: -3.7038, km: 505.1, points: 3561 },
+      { lat: -1.3, lon: 36.8, km: 2.4, points: 4992 },
+      { lat: -37.8, lon: 144.9, km: 713.6, points: 3092 },
+    ],
+    total: 11645,
+    finished: true,
+    errors: [],
+  });
+});
+
+test('buildLogRecord: the name is cleaned, none or whitespace only is an empty string', () => {
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, name: '  Саша  ' }).name, 'Саша');
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, name: 'Александр Степаненков' }).name, 'Александр Степаненко');
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, name: '' }).name, '');
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, name: ' \t ' }).name, '');
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, name: undefined }).name, '');
+});
+
+test('buildLogRecord: a challenge game has no settings and no kind', () => {
+  // Rounds decoded from a friends link carry no kind; settings were the friend's, not ours.
+  const fromLink = LOG_ROUNDS.map(({ src, id, lat, lon, cc }) => ({ src, id, lat, lon, cc }));
+  const rec = MG.buildLogRecord({
+    ...LOG_GAME, challenge: true, buildMs: 0, settings: { sources: ['g'], spheres: 'any', rounds: 3 }, rounds: fromLink,
+  });
+  assert.equal(rec.challenge, true);
+  assert.equal(rec.settings, null);
+  assert.equal(rec.buildMs, 0);
+  assert.deepEqual(rec.rounds.map((r) => r.kind), [null, null, null]);
+  assert.deepEqual(rec.rounds[0], { src: 'g', id: 'CAoSLEFGMVFpcE', cc: 'ES', lat: 41.3851, lon: 2.1734, kind: null });
+  // A kind outside the three known ones is unknown too.
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, rounds: [{ ...LOG_ROUNDS[0], kind: 'indoor' }] }).rounds[0].kind, null);
+});
+
+test('buildLogRecord: mid-game, fewer guesses than rounds, is not finished', () => {
+  const rec = MG.buildLogRecord({ ...LOG_GAME, guesses: LOG_GUESSES.slice(0, 1) });
+  assert.equal(rec.finished, false);
+  assert.equal(rec.total, 3561);
+  assert.equal(rec.guesses.length, 1);
+  assert.equal(rec.rounds.length, 3);
+  const started = MG.buildLogRecord({ ...LOG_GAME, guesses: [] });
+  assert.equal(started.finished, false);
+  assert.equal(started.total, 0);
+  // A build that failed has no rounds at all: not finished either.
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, rounds: [], guesses: [] }).finished, false);
+});
+
+test('buildLogRecord: errors are carried through, extra fields are dropped', () => {
+  const errors = [
+    { round: null, message: 'Не удалось найти достаточно мест. Попробуйте ещё раз.' },
+    { round: 2, message: 'UNKNOWN_ERROR', stack: 'at showPanorama' },
+  ];
+  const rec = MG.buildLogRecord({
+    ...LOG_GAME,
+    rounds: [{ ...LOG_ROUNDS[0], extra: 'x' }],
+    guesses: [{ ...LOG_GUESSES[0], extra: 'x' }],
+    errors,
+  });
+  assert.deepEqual(rec.errors, [
+    { round: null, message: 'Не удалось найти достаточно мест. Попробуйте ещё раз.' },
+    { round: 2, message: 'UNKNOWN_ERROR' },
+  ]);
+  assert.deepEqual(Object.keys(rec.rounds[0]), ['src', 'id', 'cc', 'lat', 'lon', 'kind']);
+  assert.deepEqual(Object.keys(rec.guesses[0]), ['lat', 'lon', 'km', 'points']);
+  assert.deepEqual(MG.buildLogRecord({ ...LOG_GAME, errors: undefined }).errors, []);
+});

@@ -1,4 +1,5 @@
-// Pure functions of MonGuess: scoring, geometry, country fix-ups and the friends link.
+// Pure functions of MonGuess: scoring, geometry, country fix-ups, the friends link and the
+// game log record.
 // No DOM and no network here, so Node runs these under tests (scripts/verify.sh);
 // the browser gets the same object as window.MG.
 (function () {
@@ -113,9 +114,39 @@
     return `${head}: ${total.toLocaleString('ru')} из ${max.toLocaleString('ru')}\n${lines.join('  ')}\nСыграй те же места: ${url}`;
   }
 
+  const LOG_KINDS = ['google', 'sphere', 'mapillary'];
+
+  // The record app.js posts to /api/log, one per game. Rounds keep how the imagery was found
+  // (kind: Google's own, a person's photosphere, Mapillary); a friends link does not carry it,
+  // so its rounds have kind null, and its settings were the friend's, so settings are null.
+  // Only the fields listed here leave the browser.
+  function buildLogRecord({ id, startedAt, buildMs, name, settings, challenge, rounds, guesses, errors }) {
+    rounds = rounds || [];
+    guesses = guesses || [];
+    return {
+      v: 1,
+      id,
+      startedAt,
+      buildMs,
+      name: cleanName(name),
+      settings: challenge || !settings
+        ? null
+        : { sources: settings.sources, spheres: settings.spheres, rounds: settings.rounds },
+      challenge: Boolean(challenge),
+      rounds: rounds.map((r) => ({
+        src: r.src, id: r.id, cc: r.cc, lat: r.lat, lon: r.lon,
+        kind: LOG_KINDS.includes(r.kind) ? r.kind : null,
+      })),
+      guesses: guesses.map((g) => ({ lat: g.lat, lon: g.lon, km: g.km, points: g.points })),
+      total: guesses.reduce((s, g) => s + g.points, 0),
+      finished: rounds.length > 0 && guesses.length >= rounds.length,
+      errors: (errors || []).map((e) => ({ round: e.round, message: String(e.message) })),
+    };
+  }
+
   const api = {
     MAX_POINTS, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, formatKm,
-    resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult,
+    resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult, buildLogRecord,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;

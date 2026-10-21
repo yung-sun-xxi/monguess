@@ -2,8 +2,9 @@
 # Publish MonGuess to Cloudflare Pages. The keys come from the macOS Keychain and are
 # written only into the uploaded copy of config.js, never into the repository.
 # Keychain items: monguess-mapillary, monguess-google, monguess-cloudflare (API token
-# with "Cloudflare Pages: Edit") and monguess-cloudflare-account (account ID; the token
-# cannot list accounts, so wrangler needs it explicitly).
+# with "Cloudflare Pages: Edit" and "Workers KV Storage: Edit": the game log in functions/
+# is bound to a KV namespace, see wrangler.toml) and monguess-cloudflare-account (account
+# ID; the token cannot list accounts, so wrangler needs it explicitly).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

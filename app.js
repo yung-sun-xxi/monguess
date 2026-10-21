@@ -4,7 +4,7 @@ const CFG = window.MG_CONFIG || {};
 // Чистые функции (очки, расстояния, ссылка для друзей) живут в lib.js: их проверяют тесты.
 const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, formatKm,
-  resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult,
+  resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult, buildLogRecord,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
@@ -15,7 +15,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const regionNames = new Intl.DisplayNames(['ru'], { type: 'region' });
 
 let places = null; // { "KE": [[lat, lon, population], ...], ... }
-const state = { rounds: [], guesses: [], index: 0 };
+// Поля лога (logId … finished) описывают текущую игру для /api/log, см. «Лог игры».
+const state = {
+  rounds: [], guesses: [], index: 0,
+  logId: '', startedAt: 0, buildMs: 0, settings: null, challenge: false, errors: [], finished: false,
+};
 
 // ---------- Страны и случайные точки ----------
 
@@ -71,7 +75,9 @@ async function googlePanoAt(lat, lon, source, needLinks) {
     });
     // У одиночной фотосферы нет соседних точек: по ней можно только крутиться, но не ходить.
     if (needLinks && !data.links?.length) return null;
-    const found = { src: 'g', id: data.location.pano, lat: data.location.latLng.lat(), lon: data.location.latLng.lng() };
+    // kind для лога: съёмка самого Google или фотосфера человека.
+    const kind = source === google.maps.StreetViewSource.GOOGLE ? 'google' : 'sphere';
+    const found = { src: 'g', id: data.location.pano, lat: data.location.latLng.lat(), lon: data.location.latLng.lng(), kind };
     // Google иногда отдаёт панораму на другом конце света (из Кубы — в Аргентину), такие отбрасываем.
     return distanceKm({ lat, lon }, found) * 1000 <= GOOGLE_RADIUS_M * 1.5 ? found : null;
   } catch {
@@ -114,7 +120,7 @@ async function tryMapillary(lat, lon) {
   const pool = panos.length ? panos : usable;
   const img = pool[Math.floor(Math.random() * pool.length)];
   const [ilon, ilat] = (img.computed_geometry || img.geometry).coordinates;
-  return { src: 'm', id: String(img.id), lat: ilat, lon: ilon };
+  return { src: 'm', id: String(img.id), lat: ilat, lon: ilon, kind: 'mapillary' };
 }
 
 async function findAt([lat, lon], sources, spheres) {
@@ -170,6 +176,52 @@ async function generateRounds(count, sources, spheres, onProgress) {
 
 const challengeUrl = () => `${location.origin}${location.pathname}#c=${encodeChallenge(state.rounds)}`;
 
+// ---------- Лог игры ----------
+
+// Каждая игра отправляет одну запись в /api/log (Cloudflare KV): при старте, в конце и при
+// закрытии страницы посреди игры. Повторная отправка той же игры перезаписывает запись.
+// Лог никогда не мешает игре: любая ошибка отправки молча проглатывается.
+
+function newLogId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+}
+
+// Новая игра: пустые раунды и свежая запись лога. settings — null для игры по ссылке.
+function beginLog(settings) {
+  Object.assign(state, {
+    rounds: [], guesses: [], index: 0,
+    logId: newLogId(), startedAt: Date.now(), buildMs: 0,
+    settings, challenge: !settings, errors: [], finished: false,
+  });
+}
+
+function logError(round, message) {
+  state.errors.push({ round, message: String(message) });
+}
+
+function postLog(beacon = false) {
+  try {
+    const body = JSON.stringify(buildLogRecord({
+      id: state.logId,
+      startedAt: state.startedAt,
+      buildMs: state.buildMs,
+      name: cleanName($('player-name').value),
+      settings: state.settings,
+      challenge: state.challenge,
+      rounds: state.rounds,
+      guesses: state.guesses,
+      errors: state.errors,
+    }));
+    if (beacon) {
+      navigator.sendBeacon('/api/log', body);
+    } else {
+      fetch('/api/log', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body })
+        .catch(() => {});
+    }
+  } catch { /* лог не должен ломать игру */ }
+}
+
 // ---------- Экраны ----------
 
 function show(id) {
@@ -193,7 +245,7 @@ async function showPanorama(round) {
   const el = document.createElement('div');
   host.appendChild(el);
   if (round.src === 'g') {
-    panoViewer = new google.maps.StreetViewPanorama(el, {
+    const pano = new google.maps.StreetViewPanorama(el, {
       pano: round.id,
       addressControl: false,
       showRoadLabels: false,
@@ -201,6 +253,13 @@ async function showPanorama(round) {
       motionTracking: false,
       motionTrackingControl: false,
     });
+    // Панорама не загрузилась (чёрный экран и т. п.) — в лог, с номером раунда.
+    const roundNo = state.index + 1;
+    pano.addListener('status_changed', () => {
+      const status = pano.getStatus();
+      if (status !== google.maps.StreetViewStatus.OK) logError(roundNo, status);
+    });
+    panoViewer = pano;
   } else {
     panoViewer = new mapillary.Viewer({
       accessToken: CFG.mapillaryToken,
@@ -245,6 +304,8 @@ async function startRound() {
   try {
     await showPanorama(round);
   } catch (e) {
+    logError(state.index + 1, e.message);
+    postLog();
     fail(e.message);
     return;
   }
@@ -271,6 +332,8 @@ function showResult(round, guess) {
 }
 
 function showFinal() {
+  state.finished = true;
+  postLog();
   show('final');
   const max = state.rounds.length * MAX_POINTS;
   $('final-total').textContent = `${total().toLocaleString('ru')} из ${max.toLocaleString('ru')}`;
@@ -350,6 +413,7 @@ async function play(rounds) {
   state.rounds = rounds;
   state.guesses = [];
   state.index = 0;
+  postLog();
   startRound();
 }
 
@@ -366,30 +430,44 @@ async function newGame() {
   }
   show('loading');
   $('loading-text').textContent = 'Загрузка…';
+  const count = Number($('rounds').value);
+  const spheres = $('spheres').value;
+  beginLog({ sources, spheres, rounds: count });
   try {
     if (sources.includes('g') && !(await loadGoogle())) throw new Error('Не удалось загрузить Google Maps.');
-    const count = Number($('rounds').value);
-    const rounds = await generateRounds(count, sources, $('spheres').value, (n, of) => {
+    const built = Date.now();
+    const rounds = await generateRounds(count, sources, spheres, (n, of) => {
       $('loading-text').textContent = `Ищу место ${n} из ${of}…`;
     });
+    state.buildMs = Date.now() - built;
     play(rounds);
     // Ссылка на игру сразу в адресе: перезагрузка не теряет места, а скопировать её можно и в середине игры.
     history.replaceState(null, '', challengeUrl());
   } catch (e) {
+    // Игра не собралась: в лог одна запись без раундов, с ошибкой.
+    logError(null, e.message);
+    postLog();
     fail(e.message);
   }
 }
 
 async function playChallenge(rounds) {
+  beginLog(null);
+  // Игра по ссылке не началась: в лог одна запись без раундов, с ошибкой.
+  const failChallenge = (message) => {
+    logError(null, message);
+    postLog();
+    fail(message);
+  };
   if (rounds.some((r) => r.src === 'm') && !CFG.mapillaryToken) {
-    fail('В этой игре есть снимки Mapillary, а ключа Mapillary здесь нет.');
+    failChallenge('В этой игре есть снимки Mapillary, а ключа Mapillary здесь нет.');
     return;
   }
   if (rounds.some((r) => r.src === 'g')) {
     show('loading');
     $('loading-text').textContent = 'Загрузка…';
     if (!(await loadGoogle())) {
-      fail('В этой игре есть панорамы Google, а ключа Google здесь нет.');
+      failChallenge('В этой игре есть панорамы Google, а ключа Google здесь нет.');
       return;
     }
   }
@@ -445,6 +523,10 @@ async function init() {
     location.reload();
   };
   window.addEventListener('resize', () => panoViewer?.resize?.());
+  // Страницу закрыли посреди игры: последнее состояние уходит в лог через sendBeacon.
+  window.addEventListener('pagehide', () => {
+    if (state.rounds.length && !state.finished) postLog(true);
+  });
 
   try {
     places = await (await fetch('data/places.json')).json();
