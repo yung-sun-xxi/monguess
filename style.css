@@ -58,6 +58,10 @@ h1 { margin: 0; font-size: 2.2rem; }
 #options { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
 #options label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
 #options .note { flex-basis: 100%; max-width: 520px; font-size: 0.9rem; }
+#options .help { flex-basis: 100%; max-width: 520px; text-align: left; color: var(--muted); font-size: 0.85rem; }
+#options .help p, #options .help ul { margin: 0 0 6px; }
+#options .help ul { padding-left: 18px; }
+#options .help b { color: var(--text); font-weight: 600; }
 
 #player-name-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
 #player-name { width: min(260px, calc(100vw - 32px)); cursor: text; color: var(--text); }
