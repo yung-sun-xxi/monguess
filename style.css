@@ -20,7 +20,7 @@ html, body {
 
 [hidden] { display: none !important; }
 
-button, select {
+button, select, input {
   font: inherit;
   color: inherit;
   background: var(--panel);
@@ -58,6 +58,10 @@ h1 { margin: 0; font-size: 2.2rem; }
 #options { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
 #options label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
 #options .note { flex-basis: 100%; max-width: 520px; font-size: 0.9rem; }
+
+#player-name-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
+#player-name { width: min(260px, calc(100vw - 32px)); cursor: text; color: var(--text); }
+#player-name::placeholder { color: var(--muted); opacity: 0.7; }
 
 .spinner {
   width: 48px; height: 48px;

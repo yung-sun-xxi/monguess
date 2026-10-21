@@ -4,7 +4,7 @@ const CFG = window.MG_CONFIG || {};
 // Чистые функции (очки, расстояния, ссылка для друзей) живут в lib.js: их проверяют тесты.
 const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, formatKm,
-  resolveCountry, encodeChallenge, decodeChallenge,
+  resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
@@ -286,9 +286,13 @@ function showFinal() {
 }
 
 function resultText() {
-  const max = state.rounds.length * MAX_POINTS;
-  const lines = state.rounds.map((r, i) => `${flag(r.cc)} ${state.guesses[i].points.toLocaleString('ru')}`);
-  return `🌍 MonGuess: ${total().toLocaleString('ru')} из ${max.toLocaleString('ru')}\n${lines.join('  ')}\nСыграй те же места: ${challengeUrl()}`;
+  return formatResult({
+    name: $('player-name').value,
+    total: total(),
+    max: state.rounds.length * MAX_POINTS,
+    rounds: state.rounds.map((r, i) => ({ cc: r.cc, points: state.guesses[i].points })),
+    url: challengeUrl(),
+  });
 }
 
 async function copy(text, message) {
@@ -299,6 +303,20 @@ async function copy(text, message) {
     $('copied').textContent = text;
   }
   $('copied').hidden = false;
+}
+
+// ---------- Имя игрока ----------
+
+// Имя помнится в браузере. В приватном режиме или с запрещённым хранилищем localStorage
+// бросает исключение: тогда имя просто не запоминается, игра работает дальше.
+const NAME_KEY = 'monguess.name';
+
+function setupPlayerName() {
+  const input = $('player-name');
+  try { input.value = cleanName(localStorage.getItem(NAME_KEY)); } catch { /* хранилище недоступно */ }
+  input.addEventListener('input', () => {
+    try { localStorage.setItem(NAME_KEY, cleanName(input.value)); } catch { /* хранилище недоступно */ }
+  });
 }
 
 // ---------- Запуск ----------
@@ -380,6 +398,7 @@ async function playChallenge(rounds) {
 
 async function init() {
   fillSourceSelect();
+  setupPlayerName();
   const hasLink = location.hash.startsWith('#c=');
   const challenge = hasLink ? decodeChallenge(location.hash.slice(3)) : null;
   if (hasLink && !challenge) $('menu-error').textContent = 'Ссылка на игру повреждена. Попросите друга скопировать её ещё раз.';

@@ -94,3 +94,55 @@ test('pickPlace and shuffle: members of the list, same elements', () => {
   assert.equal(shuffled.length, list.length);
   assert.deepEqual([...shuffled].sort(), [...list].sort());
 });
+
+test('cleanName: trims, cuts to 20 characters by code point, whitespace only is no name', () => {
+  assert.equal(MG.cleanName('  Саша  '), 'Саша');
+  assert.equal(MG.cleanName('\t\n  '), '');
+  assert.equal(MG.cleanName(''), '');
+  assert.equal(MG.cleanName('Александр Степаненков'), 'Александр Степаненко'); // 21 → 20
+  assert.equal(MG.cleanName('a'.repeat(25)), 'a'.repeat(20));
+  assert.equal(MG.cleanName('a'.repeat(20)), 'a'.repeat(20));
+  // 19 letters, then a space at position 20: cut, then trimmed again.
+  assert.equal(MG.cleanName(`${'b'.repeat(19)} tail`), 'b'.repeat(19));
+  // An emoji is one character, not two UTF-16 halves: it is never split.
+  assert.equal(MG.cleanName('😀'.repeat(25)), '😀'.repeat(20));
+  assert.equal(MG.cleanName(null), '');
+  assert.equal(MG.cleanName(undefined), '');
+  assert.equal(MG.cleanName(42), '');
+});
+
+const RESULT_GAME = {
+  total: 18400,
+  max: 25000,
+  rounds: [
+    { cc: 'ES', points: 4676 },
+    { cc: 'KE', points: 5000 },
+    { cc: 'BR', points: 0 },
+    { cc: 'JP', points: 3724 },
+    { cc: 'xx', points: 5000 },
+  ],
+  url: 'https://monguess.pages.dev/#c=abc',
+};
+// Byte for byte the text resultText() in app.js built before names existed;
+//   is the group separator toLocaleString('ru') produces.
+const RESULT_TAIL = '\n\u{1F1EA}\u{1F1F8} 4 676  \u{1F1F0}\u{1F1EA} 5 000  \u{1F1E7}\u{1F1F7} 0  '
+  + '\u{1F1EF}\u{1F1F5} 3 724  🏳️ 5 000\nСыграй те же места: https://monguess.pages.dev/#c=abc';
+const RESULT_NO_NAME = '🌍 MonGuess: 18 400 из 25 000' + RESULT_TAIL;
+
+test('formatResult: without a name, exactly the old text', () => {
+  assert.equal(MG.formatResult({ ...RESULT_GAME }), RESULT_NO_NAME);
+  assert.equal(MG.formatResult({ ...RESULT_GAME, name: '' }), RESULT_NO_NAME);
+});
+
+test('formatResult: a name goes into the first line, the rest is unchanged', () => {
+  assert.equal(MG.formatResult({ ...RESULT_GAME, name: 'Саша' }),
+    '🌍 MonGuess · Саша: 18 400 из 25 000' + RESULT_TAIL);
+  assert.equal(MG.formatResult({ ...RESULT_GAME, name: '  Саша ' }),
+    '🌍 MonGuess · Саша: 18 400 из 25 000' + RESULT_TAIL);
+});
+
+test('formatResult: whitespace only is no name, an over-long name is cut to 20', () => {
+  assert.equal(MG.formatResult({ ...RESULT_GAME, name: '   \t ' }), RESULT_NO_NAME);
+  assert.equal(MG.formatResult({ ...RESULT_GAME, name: 'Александр Степаненков' }),
+    '🌍 MonGuess · Александр Степаненко: 18 400 из 25 000' + RESULT_TAIL);
+});
