@@ -1,9 +1,11 @@
 'use strict';
 
 const CFG = window.MG_CONFIG || {};
-const MAX_POINTS = 5000;
-// Как у GeoGuessr на карте мира: 5000 · e^(−d / 1492 км).
-const SCORE_SCALE_KM = 1492.7;
+// Чистые функции (очки, расстояния, ссылка для друзей) живут в lib.js: их проверяют тесты.
+const {
+  MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, formatKm,
+  resolveCountry, encodeChallenge, decodeChallenge,
+} = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
 const BATCHES_PER_COUNTRY = 2;
@@ -19,56 +21,6 @@ const state = { rounds: [], guesses: [], index: 0 };
 
 function countryName(cc) {
   try { return regionNames.of(cc) || cc; } catch { return cc; }
-}
-
-function flag(cc) {
-  if (!/^[A-Z]{2}$/.test(cc)) return '🏳️';
-  return String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
-}
-
-function shuffle(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-// Город выбираем с весом √населения: столицы чаще, но и маленькие города попадаются.
-function pickPlace(list) {
-  const weights = list.map((p) => Math.sqrt(p[2]));
-  let r = Math.random() * weights.reduce((s, w) => s + w, 0);
-  for (let i = 0; i < list.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return list[i];
-  }
-  return list[list.length - 1];
-}
-
-// Точка в 1–40 км от города, чаще ближе: так попадаем и в города, и в глубинку.
-function randomPointNear(list) {
-  const [lat, lon] = pickPlace(list);
-  const km = 1 + Math.random() * Math.random() * 40;
-  const bearing = Math.random() * 2 * Math.PI;
-  const dLat = (km / 111.32) * Math.cos(bearing);
-  const dLon = (km / (111.32 * Math.max(Math.cos((lat * Math.PI) / 180), 0.1))) * Math.sin(bearing);
-  return [Math.max(-85, Math.min(85, lat + dLat)), ((lon + dLon + 540) % 360) - 180];
-}
-
-function distanceKm(a, b) {
-  const rad = (d) => (d * Math.PI) / 180;
-  const dLat = rad(b.lat - a.lat);
-  const dLon = rad(b.lon - a.lon);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.sqrt(h));
-}
-
-const scoreFor = (km) => Math.round(MAX_POINTS * Math.exp(-km / SCORE_SCALE_KM));
-
-function formatKm(km) {
-  if (km < 1) return `${Math.round(km * 1000)} м`;
-  return `${Math.round(km).toLocaleString('ru')} км`;
 }
 
 // ---------- Источники снимков ----------
@@ -91,6 +43,21 @@ function loadGoogle() {
 
 // Google зовёт эту функцию, если ключ не подошёл.
 window.gm_authFailure = () => fail('Google не принял ключ. Проверьте googleApiKey в config.js и ограничения ключа.');
+
+// mapillary-js весит 1 МБ: грузим его только когда нужна панорама Mapillary.
+let mapillaryReady = null;
+function loadMapillary() {
+  mapillaryReady ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js';
+    s.integrity = 'sha384-1AlAxcgdzKreJ5f2K+t7SW3pEE0ek9u3lUwlZXX+v+FtEk1tWSg6DBVLb3ZKhpB+';
+    s.crossOrigin = 'anonymous';
+    s.onload = () => resolve();
+    s.onerror = () => { mapillaryReady = null; reject(new Error('Не удалось загрузить Mapillary.')); };
+    document.head.appendChild(s);
+  });
+  return mapillaryReady;
+}
 
 const GOOGLE_RADIUS_M = 3000;
 
@@ -173,24 +140,12 @@ async function countryAt(lat, lon) {
   }
 }
 
-// Nominatim называет заморские территории страной-владельцем: Аруба у него Нидерланды,
-// Гонконг — Китай. Если снимок нашёлся в такой территории, оставляем её саму.
-const TERRITORY_OWNER = {
-  AS: 'US', GU: 'US', MP: 'US', PR: 'US', VI: 'US',
-  AW: 'NL', CW: 'NL', SX: 'NL', BQ: 'NL',
-  GF: 'FR', GP: 'FR', MQ: 'FR', RE: 'FR', YT: 'FR', NC: 'FR', PF: 'FR', PM: 'FR', WF: 'FR', BL: 'FR', MF: 'FR',
-  AX: 'FI', SJ: 'NO', HK: 'CN', MO: 'CN', GL: 'DK', FO: 'DK',
-};
-
-function resolveCountry(target, found) {
-  if (!found) return target;
-  return TERRITORY_OWNER[target] === found ? target : found;
-}
-
 // Каждый раунд — новая страна, страны выбираются равновероятно.
 async function generateRounds(count, sources, spheres, onProgress) {
   const rounds = [];
   const usedCountries = new Set();
+  // Панорама у границы находится из двух стран; когда Nominatim промолчал, по стране её не отсеять.
+  const usedIds = new Set();
   for (const cc of shuffle(Object.keys(places))) {
     if (rounds.length === count) break;
     if (usedCountries.has(cc)) continue;
@@ -200,10 +155,11 @@ async function generateRounds(count, sources, spheres, onProgress) {
       const points = Array.from({ length: POINTS_PER_BATCH }, () => randomPointNear(places[cc]));
       found = (await Promise.all(points.map((p) => findAt(p, sources, spheres)))).find(Boolean) || null;
     }
-    if (!found) continue;
+    if (!found || usedIds.has(found.id)) continue;
     found.cc = resolveCountry(cc, await countryAt(found.lat, found.lon));
     if (usedCountries.has(found.cc)) continue;
     usedCountries.add(found.cc);
+    usedIds.add(found.id);
     rounds.push(found);
   }
   if (rounds.length < count) throw new Error('Не удалось найти достаточно мест. Попробуйте ещё раз.');
@@ -211,20 +167,6 @@ async function generateRounds(count, sources, spheres, onProgress) {
 }
 
 // ---------- Ссылка для друзей ----------
-
-function encodeChallenge(rounds) {
-  const compact = rounds.map((r) => [r.src, r.id, +r.lat.toFixed(6), +r.lon.toFixed(6), r.cc]);
-  return btoa(JSON.stringify(compact)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function decodeChallenge(str) {
-  try {
-    const json = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(json).map(([src, id, lat, lon, cc]) => ({ src, id, lat, lon, cc }));
-  } catch {
-    return null;
-  }
-}
 
 const challengeUrl = () => `${location.origin}${location.pathname}#c=${encodeChallenge(state.rounds)}`;
 
@@ -242,7 +184,8 @@ function fail(message) {
 const total = () => state.guesses.reduce((s, g) => s + g.points, 0);
 
 let panoViewer = null;
-function showPanorama(round) {
+async function showPanorama(round) {
+  if (round.src === 'm') await loadMapillary();
   if (panoViewer?.remove) panoViewer.remove(); // у Mapillary свой teardown
   panoViewer = null;
   const host = $('pano');
@@ -294,12 +237,17 @@ function resetGuessMap() {
   $('guess').disabled = true;
 }
 
-function startRound() {
+async function startRound() {
   const round = state.rounds[state.index];
   show('game');
   $('hud-round').textContent = `Раунд ${state.index + 1} / ${state.rounds.length}`;
   $('hud-score').textContent = `Очки: ${total().toLocaleString('ru')}`;
-  showPanorama(round);
+  try {
+    await showPanorama(round);
+  } catch (e) {
+    fail(e.message);
+    return;
+  }
   resetGuessMap();
 }
 
@@ -365,8 +313,9 @@ function availableSources() {
 function fillSourceSelect() {
   const have = availableSources();
   const options = [];
-  if (have.length === 2) options.push(['gm', 'Google + Mapillary']);
+  // Временно Google первым, он и выбран по умолчанию: Mapillary Graph API отдаёт пустоту (с 2026-10-19).
   if (have.includes('g')) options.push(['g', 'Только Google']);
+  if (have.length === 2) options.push(['gm', 'Google + Mapillary']);
   if (have.includes('m')) options.push(['m', 'Только Mapillary']);
   $('source').innerHTML = options.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
   // Фотосферы бывают только у Google.
@@ -405,14 +354,19 @@ async function newGame() {
     const rounds = await generateRounds(count, sources, $('spheres').value, (n, of) => {
       $('loading-text').textContent = `Ищу место ${n} из ${of}…`;
     });
-    history.replaceState(null, '', location.pathname);
     play(rounds);
+    // Ссылка на игру сразу в адресе: перезагрузка не теряет места, а скопировать её можно и в середине игры.
+    history.replaceState(null, '', challengeUrl());
   } catch (e) {
     fail(e.message);
   }
 }
 
 async function playChallenge(rounds) {
+  if (rounds.some((r) => r.src === 'm') && !CFG.mapillaryToken) {
+    fail('В этой игре есть снимки Mapillary, а ключа Mapillary здесь нет.');
+    return;
+  }
   if (rounds.some((r) => r.src === 'g')) {
     show('loading');
     $('loading-text').textContent = 'Загрузка…';
@@ -426,12 +380,14 @@ async function playChallenge(rounds) {
 
 async function init() {
   fillSourceSelect();
-  const challenge = location.hash.startsWith('#c=') ? decodeChallenge(location.hash.slice(3)) : null;
+  const hasLink = location.hash.startsWith('#c=');
+  const challenge = hasLink ? decodeChallenge(location.hash.slice(3)) : null;
+  if (hasLink && !challenge) $('menu-error').textContent = 'Ссылка на игру повреждена. Попросите друга скопировать её ещё раз.';
 
-  if (challenge?.length) {
+  if (challenge) {
     const n = challenge.length;
     const word = n % 10 === 1 && n % 100 !== 11 ? 'раунд' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'раунда' : 'раундов';
-    $('challenge-note').textContent = `Друг позвал вас сыграть: ${n} ${word}, те же места.`;
+    $('challenge-note').textContent = `Игра по ссылке: ${n} ${word}, те же места.`;
     $('challenge-note').hidden = false;
     $('options').hidden = true;
     $('new-instead').hidden = false;
@@ -439,7 +395,7 @@ async function init() {
   }
 
   $('start').onclick = () => {
-    if (challenge?.length && location.hash.startsWith('#c=')) playChallenge(challenge);
+    if (challenge && location.hash.startsWith('#c=')) playChallenge(challenge);
     else newGame();
   };
   $('new-instead').onclick = () => {

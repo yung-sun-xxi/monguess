@@ -10,6 +10,19 @@ cd "$(dirname "$0")/.."
 PROJECT=monguess
 WRANGLER=wrangler@4.151.3
 
+# Only a clean master that matches origin goes live: a branch deployed from here would
+# silently become the site.
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$branch" != master ] || [ -n "$(git status --porcelain)" ]; then
+  echo "Deploy only from a clean master checkout (now on '$branch'$([ -n "$(git status --porcelain)" ] && echo ", with uncommitted changes"))." >&2
+  exit 1
+fi
+git fetch -q origin master
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/master)" ]; then
+  echo "Local master differs from origin/master: pull or push first." >&2
+  exit 1
+fi
+
 key() { security find-generic-password -a "$USER" -s "$1" -w 2>/dev/null || true; }
 export CLOUDFLARE_API_TOKEN="$(key monguess-cloudflare)"
 export CLOUDFLARE_ACCOUNT_ID="$(key monguess-cloudflare-account)"
@@ -20,7 +33,7 @@ fi
 
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
-cp index.html style.css app.js "$out"/
+cp index.html style.css lib.js app.js "$out"/
 cp -R data "$out"/
 MG_MAPILLARY_TOKEN="$(key monguess-mapillary)" MG_GOOGLE_API_KEY="$(key monguess-google)" python3 - "$out/config.js" <<'PY'
 import json, os, sys
@@ -32,4 +45,4 @@ PY
 # once the project exists, later commands run against Pages directly.
 npx --yes "$WRANGLER" pages project list 2>/dev/null | grep -qw "$PROJECT" \
   || npx --yes "$WRANGLER" pages project create "$PROJECT" --production-branch master --force
-npx --yes "$WRANGLER" pages deploy "$out" --project-name "$PROJECT" --branch master --commit-dirty=true
+npx --yes "$WRANGLER" pages deploy "$out" --project-name "$PROJECT" --branch master

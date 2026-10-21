@@ -50,6 +50,14 @@ scripts/play.sh
 В меню есть настройка **«Фотосферы людей»**: без них (только машины Google), только те,
 по которым можно ходить (у точки есть соседние), или любые, даже одиночные.
 
+## Проверка
+
+```bash
+scripts/verify.sh
+```
+
+Синтаксис всех файлов и тесты `lib.js` (`node --test`). Ноль на выходе — всё зелёное.
+
 ## Выкладка
 
 Сайт живёт на Cloudflare Pages: https://monguess.pages.dev. Выложить текущую версию:
@@ -61,7 +69,7 @@ scripts/deploy.sh
 Ключи берутся из Связки ключей (плюс `monguess-cloudflare` — токен с правом
 «Cloudflare Pages: Edit» и `monguess-cloudflare-account` — ID аккаунта) и попадают только
 в выкладываемую копию `config.js`. У ключа Google в ограничениях должен быть адрес
-`https://monguess.pages.dev/*`.
+`https://monguess.pages.dev/*`. Скрипт выкладывает только чистый `master`, совпадающий с GitHub.
 
 ## Игра с друзьями
 
@@ -71,7 +79,8 @@ scripts/deploy.sh
 
 ## Как устроено
 
-- `index.html`, `style.css`, `app.js` — вся игра, без сборки.
+- `index.html`, `style.css`, `lib.js`, `app.js` — вся игра, без сборки. В `lib.js` чистые функции
+  (очки, расстояния, ссылка для друзей), их проверяют тесты в `tests/`.
 - `data/places.json` — ~7300 городов по странам из [Natural Earth](https://www.naturalearthdata.com)
   (общественное достояние). Случайная точка берётся в 1–40 км от случайного города страны.
 - Страна снимка определяется через Nominatim (OpenStreetMap).
