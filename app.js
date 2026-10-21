@@ -1,6 +1,6 @@
 'use strict';
 
-const CFG = window.WG_CONFIG || {};
+const CFG = window.MG_CONFIG || {};
 const MAX_POINTS = 5000;
 // Как у GeoGuessr на карте мира: 5000 · e^(−d / 1492 км).
 const SCORE_SCALE_KM = 1492.7;
@@ -312,7 +312,7 @@ function showFinal() {
 function resultText() {
   const max = state.rounds.length * MAX_POINTS;
   const lines = state.rounds.map((r, i) => `${flag(r.cc)} ${state.guesses[i].points.toLocaleString('ru')}`);
-  return `🌍 World Guesser: ${total().toLocaleString('ru')} из ${max.toLocaleString('ru')}\n${lines.join('  ')}\nСыграй те же места: ${challengeUrl()}`;
+  return `🌍 MonGuess: ${total().toLocaleString('ru')} из ${max.toLocaleString('ru')}\n${lines.join('  ')}\nСыграй те же места: ${challengeUrl()}`;
 }
 
 async function copy(text, message) {
