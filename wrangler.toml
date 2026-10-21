@@ -1,0 +1,12 @@
+# Cloudflare Pages config for MonGuess: the Functions in functions/ and their KV binding.
+# scripts/deploy.sh assembles the site in a temporary folder and passes that folder to
+# `wrangler pages deploy` explicitly; pages_build_output_dir is here only because wrangler
+# reads this file as a Pages config when the key is present.
+name = "monguess"
+pages_build_output_dir = "."
+compatibility_date = "2026-06-01"
+
+# The game log (functions/api/log.js, read by scripts/logs.sh). KV namespace "monguess-log".
+[[kv_namespaces]]
+binding = "LOG"
+id = "f92fd3f1a21b4bbfb1f234886c2596a8"
