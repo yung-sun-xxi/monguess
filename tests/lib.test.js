@@ -104,6 +104,8 @@ test('cleanName: trims, cuts to 20 characters by code point, whitespace only is 
   assert.equal(MG.cleanName('a'.repeat(20)), 'a'.repeat(20));
   // 19 letters, then a space at position 20: cut, then trimmed again.
   assert.equal(MG.cleanName(`${'b'.repeat(19)} tail`), 'b'.repeat(19));
+  // Leading spaces do not eat into the 20: trimmed before the cut.
+  assert.equal(MG.cleanName(`   ${'c'.repeat(25)}`), 'c'.repeat(20));
   // An emoji is one character, not two UTF-16 halves: it is never split.
   assert.equal(MG.cleanName('😀'.repeat(25)), '😀'.repeat(20));
   assert.equal(MG.cleanName(null), '');
