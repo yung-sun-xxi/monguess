@@ -1,2 +1,4 @@
 .agent/
 .wrangler/
+.claude/worktrees/
+.claude/launch.json
