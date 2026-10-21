@@ -17,31 +17,45 @@
 
     <div id="challenge-note" class="note" hidden></div>
 
-    <label id="player-name-label" for="player-name">Ваше имя
-      <input id="player-name" type="text" maxlength="20" autocomplete="nickname"
-             placeholder="необязательно" spellcheck="false">
-    </label>
+    <div id="menu-body">
+      <div id="menu-controls">
+        <label id="player-name-label" for="player-name">Ваше имя
+          <input id="player-name" type="text" maxlength="20" autocomplete="nickname"
+                 placeholder="необязательно" spellcheck="false">
+        </label>
 
-    <div id="options">
-      <label>Раундов
-        <select id="rounds">
-          <option>3</option>
-          <option selected>5</option>
-          <option>10</option>
-        </select>
-      </label>
-      <label>Снимки
-        <select id="source"></select>
-      </label>
-      <label id="spheres-label">Фотосферы людей
-        <select id="spheres">
-          <option value="off">Нет, только машины Google</option>
-          <option value="walk" selected>Только где можно ходить</option>
-          <option value="any">Любые, даже одна точка</option>
-        </select>
-      </label>
+        <div id="options">
+          <label>Раундов
+            <select id="rounds">
+              <option>3</option>
+              <option selected>5</option>
+              <option>10</option>
+            </select>
+          </label>
+          <label>Снимки
+            <select id="source"></select>
+          </label>
+          <label id="spheres-label">Фотосферы людей
+            <select id="spheres">
+              <option value="off">Нет, только машины Google</option>
+              <option value="walk" selected>Только где можно ходить</option>
+              <option value="any">Любые, даже одна точка</option>
+            </select>
+          </label>
+          <p id="mapillary-note" class="note" hidden>
+            Mapillary сейчас не отдаёт снимки (сбой на их стороне), поэтому места с ним ищутся медленно.
+            Пока лучше выбрать «Только Google».
+          </p>
+        </div>
+
+        <button id="start" class="primary">Новая игра</button>
+        <button id="new-instead" class="link" hidden>или начать свою игру</button>
+        <p id="menu-error" class="error"></p>
+      </div>
+
       <!-- Временная шпаргалка по настройкам, пока нет нормальной главной (#7). -->
-      <div id="settings-help" class="help">
+      <aside id="settings-help" class="help">
+        <h2>Что значат настройки</h2>
         <p><b>Снимки</b> — откуда берутся места.</p>
         <ul>
           <li><b>Google</b> — панорамы Google Street View, их снимают машины Google. Лучшее качество, но
@@ -58,16 +72,8 @@
             было пройтись.</li>
           <li><b>Любые</b> — даже одиночный снимок: можно только оглядеться, но не сдвинуться.</li>
         </ul>
-      </div>
-      <p id="mapillary-note" class="note" hidden>
-        Mapillary сейчас не отдаёт снимки (сбой на их стороне), поэтому места с ним ищутся медленно.
-        Пока лучше выбрать «Только Google».
-      </p>
+      </aside>
     </div>
-
-    <button id="start" class="primary">Новая игра</button>
-    <button id="new-instead" class="link" hidden>или начать свою игру</button>
-    <p id="menu-error" class="error"></p>
   </section>
 
   <section id="loading" class="screen" hidden>
