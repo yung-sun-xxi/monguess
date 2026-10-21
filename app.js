@@ -92,21 +92,31 @@ function loadGoogle() {
 // Google зовёт эту функцию, если ключ не подошёл.
 window.gm_authFailure = () => fail('Google не принял ключ. Проверьте googleApiKey в config.js и ограничения ключа.');
 
+const GOOGLE_RADIUS_M = 3000;
+
 let streetViewService = null;
-async function tryGoogle(lat, lon) {
-  streetViewService ??= new google.maps.StreetViewService();
+async function googlePanoAt(lat, lon, source) {
   try {
     const { data } = await streetViewService.getPanorama({
       location: { lat, lng: lon },
-      radius: 3000,
-      // OUTDOOR: панорамы Google и уличные фотосферы людей, без съёмки внутри зданий.
-      sources: [google.maps.StreetViewSource.OUTDOOR],
+      radius: GOOGLE_RADIUS_M,
+      sources: [source],
     });
-    const loc = data.location;
-    return { src: 'g', id: loc.pano, lat: loc.latLng.lat(), lon: loc.latLng.lng() };
+    const found = { src: 'g', id: data.location.pano, lat: data.location.latLng.lat(), lon: data.location.latLng.lng() };
+    // Google иногда отдаёт панораму на другом конце света (из Кубы — в Аргентину), такие отбрасываем.
+    return distanceKm({ lat, lon }, found) * 1000 <= GOOGLE_RADIUS_M * 1.5 ? found : null;
   } catch {
     return null;
   }
+}
+
+// Сначала съёмка самого Google, и только если её нет — фотосферы людей:
+// без этого даже в Японии попадаются фотосферы баров вместо улиц.
+async function tryGoogle(lat, lon) {
+  streetViewService ??= new google.maps.StreetViewService();
+  return (await googlePanoAt(lat, lon, google.maps.StreetViewSource.GOOGLE))
+    // OUTDOOR: панорамы Google и уличные фотосферы людей, без съёмки внутри зданий.
+    || googlePanoAt(lat, lon, google.maps.StreetViewSource.OUTDOOR);
 }
 
 async function tryMapillary(lat, lon) {
@@ -159,6 +169,20 @@ async function countryAt(lat, lon) {
   }
 }
 
+// Nominatim называет заморские территории страной-владельцем: Аруба у него Нидерланды,
+// Гонконг — Китай. Если снимок нашёлся в такой территории, оставляем её саму.
+const TERRITORY_OWNER = {
+  AS: 'US', GU: 'US', MP: 'US', PR: 'US', VI: 'US',
+  AW: 'NL', CW: 'NL', SX: 'NL', BQ: 'NL',
+  GF: 'FR', GP: 'FR', MQ: 'FR', RE: 'FR', YT: 'FR', NC: 'FR', PF: 'FR', PM: 'FR', WF: 'FR', BL: 'FR', MF: 'FR',
+  AX: 'FI', SJ: 'NO', HK: 'CN', MO: 'CN', GL: 'DK', FO: 'DK',
+};
+
+function resolveCountry(target, found) {
+  if (!found) return target;
+  return TERRITORY_OWNER[target] === found ? target : found;
+}
+
 // Каждый раунд — новая страна, страны выбираются равновероятно.
 async function generateRounds(count, sources, onProgress) {
   const rounds = [];
@@ -173,7 +197,7 @@ async function generateRounds(count, sources, onProgress) {
       found = (await Promise.all(points.map((p) => findAt(p, sources)))).find(Boolean) || null;
     }
     if (!found) continue;
-    found.cc = (await countryAt(found.lat, found.lon)) || cc;
+    found.cc = resolveCountry(cc, await countryAt(found.lat, found.lon));
     if (usedCountries.has(found.cc)) continue;
     usedCountries.add(found.cc);
     rounds.push(found);
