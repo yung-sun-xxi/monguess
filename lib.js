@@ -105,6 +105,13 @@
     return [...raw.trim()].slice(0, NAME_MAX).join('').trim();
   }
 
+  const NAME_REQUIRED = 'Введите имя, чтобы начать игру.';
+
+  // A game starts only with a name: '' when there is one, otherwise the message to show.
+  function nameError(raw) {
+    return cleanName(raw) ? '' : NAME_REQUIRED;
+  }
+
   // The text of "Скопировать результат". rounds is [{ cc, points }]; without a name the text
   // is exactly what the game copied before names existed.
   function formatResult({ name, total, max, rounds, url }) {
@@ -146,7 +153,7 @@
 
   const api = {
     MAX_POINTS, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, formatKm,
-    resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult, buildLogRecord,
+    resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;
