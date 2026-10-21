@@ -53,24 +53,27 @@ button.link { background: none; border: none; color: var(--muted); text-decorati
 
 h1 { margin: 0; font-size: 2.2rem; }
 .sub, .note { color: var(--muted); margin: 0; }
+.sub { max-width: 440px; }
 .error { color: var(--error); min-height: 1.4em; margin: 0; max-width: 520px; }
 
-#options { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
-#options label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
-#options .note { flex-basis: 100%; max-width: 520px; font-size: 0.9rem; }
-#player-name-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
-#player-name { width: min(260px, calc(100vw - 32px)); cursor: text; color: var(--text); }
+/* Главная: одна узкая колонка. Имя и «Играть» сверху, ниже «Как играть» и свёрнутые настройки. */
+#menu-body { display: flex; flex-direction: column; align-items: stretch; gap: 14px; width: min(420px, 100%); }
+#player-name-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; text-align: left; }
+#player-name { width: 100%; cursor: text; color: var(--text); }
 #player-name.invalid { border-color: var(--error); outline: 1px solid var(--error); }
+#start { font-size: 1.25rem; padding: 14px 16px; }
+#landing { display: flex; flex-direction: column; gap: 14px; }
 
-/* Меню: настройки и временная шпаргалка к ним. На узком экране — друг под другом,
-   на широком — две колонки: поля слева, текст справа. */
-#menu-body { display: flex; flex-direction: column; align-items: center; gap: 28px; width: 100%; max-width: 860px; }
-#menu-controls { display: flex; flex-direction: column; align-items: center; gap: 16px; }
-/* По ссылке друга настройки скрыты — шпаргалка к ним тоже не нужна. */
-#menu-body:has(#options[hidden]) #settings-help { display: none; }
+#settings { text-align: left; }
+#settings summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+#settings summary:hover { color: var(--text); }
+#settings[open] summary { margin-bottom: 10px; }
+#options { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+#options label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
+#options select { width: 100%; }
+#options .note { font-size: 0.9rem; }
 
 .help {
-  max-width: 520px;
   text-align: left;
   color: var(--muted);
   font-size: 0.85rem;
@@ -80,21 +83,12 @@ h1 { margin: 0; font-size: 2.2rem; }
   padding: 16px 18px;
 }
 .help h2 { margin: 0 0 10px; font-size: 1rem; color: var(--text); }
-.help p, .help ul { margin: 0 0 8px; }
-.help ul { padding-left: 18px; }
-.help ul:last-child { margin-bottom: 0; }
+.help p, .help ul, .help ol { margin: 0 0 8px; }
+.help ul, .help ol { padding-left: 18px; }
+.help ul:last-child, .help ol:last-child { margin-bottom: 0; }
 .help li + li { margin-top: 4px; }
 .help b { color: var(--text); font-weight: 600; }
-
-@media (min-width: 760px) {
-  #menu-body { flex-direction: row; align-items: flex-start; justify-content: center; gap: 36px; }
-  #menu-controls { width: 300px; flex-shrink: 0; align-items: stretch; text-align: left; }
-  #menu-controls #options { flex-direction: column; flex-wrap: nowrap; }
-  #menu-controls label, #player-name { width: 100%; }
-  #menu-controls select { width: 100%; }
-  #menu-controls .note { max-width: none; }
-  .help { flex: 1; }
-}
+#how-to { font-size: 0.95rem; }
 
 .spinner {
   width: 48px; height: 48px;

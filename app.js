@@ -497,11 +497,10 @@ async function init() {
   if (challenge) {
     const n = challenge.length;
     const word = n % 10 === 1 && n % 100 !== 11 ? 'раунд' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'раунда' : 'раундов';
-    $('challenge-note').textContent = `Игра по ссылке: ${n} ${word}, те же места.`;
+    $('challenge-note').textContent = `Друг позвал вас сыграть: ${n} ${word}, те же места.`;
     $('challenge-note').hidden = false;
-    $('options').hidden = true;
+    $('landing').hidden = true;
     $('new-instead').hidden = false;
-    $('start').textContent = 'Играть';
   }
 
   $('start').onclick = () => {
@@ -512,9 +511,8 @@ async function init() {
   $('new-instead').onclick = () => {
     history.replaceState(null, '', location.pathname);
     $('challenge-note').hidden = true;
-    $('options').hidden = false;
+    $('landing').hidden = false;
     $('new-instead').hidden = true;
-    $('start').textContent = 'Новая игра';
   };
   $('guess').onclick = () => {
     const round = state.rounds[state.index];
