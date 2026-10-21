@@ -370,7 +370,11 @@ function fillSourceSelect() {
   if (have.includes('m')) options.push(['m', 'Только Mapillary']);
   $('source').innerHTML = options.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
   // Фотосферы бывают только у Google.
-  const syncSpheres = () => { $('spheres-label').hidden = !$('source').value.includes('g'); };
+  const syncSpheres = () => {
+    $('spheres-label').hidden = !$('source').value.includes('g');
+    // Временно: у нового приложения Mapillary Graph API отдаёт пустоту (с 2026-10-19).
+    $('mapillary-note').hidden = !$('source').value.includes('m');
+  };
   $('source').onchange = syncSpheres;
   syncSpheres();
 }
