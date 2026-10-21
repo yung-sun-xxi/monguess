@@ -95,9 +95,27 @@
     }
   }
 
+  const NAME_MAX = 20;
+
+  // The player's name as typed: trimmed, at most 20 characters, whitespace only is no name.
+  // Cut by code points, so an emoji or a surrogate pair is never split in half.
+  function cleanName(raw) {
+    if (typeof raw !== 'string') return '';
+    return [...raw.trim()].slice(0, NAME_MAX).join('').trim();
+  }
+
+  // The text of "Скопировать результат". rounds is [{ cc, points }]; without a name the text
+  // is exactly what the game copied before names existed.
+  function formatResult({ name, total, max, rounds, url }) {
+    const who = cleanName(name);
+    const head = who ? `🌍 MonGuess · ${who}` : '🌍 MonGuess';
+    const lines = rounds.map((r) => `${flag(r.cc)} ${r.points.toLocaleString('ru')}`);
+    return `${head}: ${total.toLocaleString('ru')} из ${max.toLocaleString('ru')}\n${lines.join('  ')}\nСыграй те же места: ${url}`;
+  }
+
   const api = {
     MAX_POINTS, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, formatKm,
-    resolveCountry, encodeChallenge, decodeChallenge,
+    resolveCountry, encodeChallenge, decodeChallenge, cleanName, formatResult,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;
