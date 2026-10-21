@@ -57,6 +57,7 @@ h1 { margin: 0; font-size: 2.2rem; }
 
 #options { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
 #options label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 0.9rem; }
+#options .note { flex-basis: 100%; max-width: 520px; font-size: 0.9rem; }
 
 .spinner {
   width: 48px; height: 48px;
