@@ -37,6 +37,8 @@ class Sim {
     while (this.alarmAt != null && this.alarmAt <= target) {
       this.now = this.alarmAt;
       this.send({ type: 'alarm' });
+      // An alarm that asks to be woken again at once would spin the Durable Object.
+      assert.ok(this.alarmAt == null || this.alarmAt > this.now, `alarm at ${this.now} asked for ${this.alarmAt}`);
     }
     this.now = target;
   }
@@ -136,6 +138,19 @@ test('join with a known playerId does not add a second player', () => {
   const players = out.find((o) => o.msg.type === 'players');
   assert.equal(players.to, 'all');
   assert.equal(players.msg.players.length, 2);
+});
+
+test('a player who comes back mid-game with the same playerId keeps their points', () => {
+  const sim = room();
+  sim.send({ type: 'start', playerId: 'a' });
+  guess(sim, 'a', 48.85, 2.35);
+  sim.send({ type: 'leave', playerId: 'b' });
+  sim.tick(5000);
+  sim.send({ type: 'join', playerId: 'a', name: 'Ann' });
+  assert.deepEqual(Object.keys(sim.state.players), ['a', 'b']);
+  assert.deepEqual(sim.state.players.a.points, [5000]);
+  sim.send({ type: 'join', playerId: 'b', name: 'Bob' });
+  assert.deepEqual(sim.state.players.b.points, [0]);
 });
 
 test('any player can start, not only the creator; the round hides the answer', () => {
