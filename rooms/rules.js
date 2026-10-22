@@ -69,7 +69,7 @@
 
 const MG = require('../lib.js');
 
-const RESULTS_MS = 5000;
+const RESULTS_MS = MG.RESULTS_MS;
 const GRACE_MS = 10000;
 const IDLE_MS = 3 * 60 * 60 * 1000;
 const MAX_ROUNDS = 20;

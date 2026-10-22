@@ -241,6 +241,17 @@
   // Whole seconds from now to a room deadline (endsAt, nextAt), rounded up; 0 once it passed.
   const secondsLeft = (at, now) => Math.max(0, Math.ceil((at - now) / 1000));
 
+  // The pause on the results screen before the next round starts by itself, in a room
+  // (rooms/rules.js) and in a solo game alike.
+  const RESULTS_MS = 5000;
+
+  // The countdown under a round's results to the deadline at: "Следующий раунд через 3…",
+  // then "Следующий раунд…" once it passed.
+  function nextRoundText(at, now) {
+    const left = secondsLeft(at, now);
+    return left ? `Следующий раунд через ${left}…` : 'Следующий раунд…';
+  }
+
   // The rows of a round's results table, from the room's 'results' message: every player of
   // the table in its order (best total first), with their guess (lat, lon null without one),
   // its distance in words, this round's points and the running total. you: the player whose
@@ -317,8 +328,8 @@
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
-    guessedStatus, secondsLeft, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText, parseRoomSeat,
-    reconnectDelay,
+    guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
+    parseRoomSeat, reconnectDelay,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;

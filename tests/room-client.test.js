@@ -111,6 +111,21 @@ test('secondsLeft: whole seconds to a deadline, rounded up, never below 0', () =
   assert.equal(MG.secondsLeft(at, at + 5_000), 0);
 });
 
+test('nextRoundText: the countdown to the next round, the same wording solo and in a room', () => {
+  const at = 1_800_000_005_000;
+  assert.equal(MG.nextRoundText(at, at - 5_000), 'Следующий раунд через 5…');
+  assert.equal(MG.nextRoundText(at, at - 4_001), 'Следующий раунд через 5…');
+  assert.equal(MG.nextRoundText(at, at - 4_000), 'Следующий раунд через 4…');
+  assert.equal(MG.nextRoundText(at, at - 1), 'Следующий раунд через 1…');
+  assert.equal(MG.nextRoundText(at, at), 'Следующий раунд…');
+  assert.equal(MG.nextRoundText(at, at + 3_000), 'Следующий раунд…');
+});
+
+test('RESULTS_MS: one 5 s pause after a round, shared by the room rules and the solo game', () => {
+  assert.equal(MG.RESULTS_MS, 5000);
+  assert.equal(R.RESULTS_MS, MG.RESULTS_MS);
+});
+
 // A real results message: the room rules play one round of three players, Cat never guesses.
 function playedResults() {
   const t = 1_800_000_000_000;
