@@ -227,10 +227,9 @@ html.setup-open .setup,
   justify-content: center;
   padding: 76px 16px 232px;
   text-align: center;
-  /* Day sky is the bottom layer; the other three fade in over it. */
-  background:
-    radial-gradient(circle 180px at 80% 20%, #fffdf2 0 19px, rgba(255, 242, 196, 0.8) 22px, rgba(255, 226, 150, 0.3) 52px, transparent 180px),
-    linear-gradient(to bottom, #1c4f80 0%, #2f6d9f 38%, #6fa2c4 64%, #b9d2dc 80%, #d8e2d9 100%);
+  /* Day sky is the bottom layer; the other three fade in over it. The sun and the moon are
+     elements of their own (.sun-x, .moon-x) so they can cross the sky. */
+  background: linear-gradient(to bottom, #1c4f80 0%, #2f6d9f 38%, #6fa2c4 64%, #b9d2dc 80%, #d8e2d9 100%);
 }
 .pano { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
 .sky, .stars { position: absolute; inset: 0; }
@@ -240,9 +239,7 @@ html.setup-open .setup,
     linear-gradient(to bottom, #151a36 0%, #2d2c56 28%, #6e4566 48%, #c4644c 64%, #f0a35a 76%, #f6c27a 100%);
 }
 .sky-night {
-  background:
-    radial-gradient(circle 80px at 20% 20%, #eeeadb 0 13px, rgba(238, 234, 219, 0.2) 15px, rgba(238, 234, 219, 0.06) 34px, transparent 80px),
-    linear-gradient(to bottom, #04070d 0%, #08101c 40%, #121d31 72%, #1b2840 100%);
+  background: linear-gradient(to bottom, #04070d 0%, #08101c 40%, #121d31 72%, #1b2840 100%);
 }
 .sky-dawn {
   background:
@@ -372,6 +369,134 @@ html.setup-open .setup,
 @keyframes sky-dawn { 0%, 70% { opacity: 0; } 78%, 86% { opacity: 1; } 96%, 100% { opacity: 0; } }
 @keyframes lights { 0%, 26% { opacity: 0; } 40% { opacity: 0.6; } 50%, 74% { opacity: 1; } 86%, 100% { opacity: 0; } }
 @keyframes stars { 0%, 44% { opacity: 0; } 54%, 74% { opacity: 1; } 82%, 100% { opacity: 0; } }
+
+/* ---------- Banner sky: a guest for every part of the day ----------
+   Sun by day and at sunset, clouds by day, the moon, shooting stars and a plane at night, a V of
+   birds at dawn. All run on the same --cycle and --phase as the skies above, so they keep time
+   with them. Positions use vw and svh: the banner fills the screen. */
+.sky-body, .sky-fx { position: absolute; left: 0; top: 0; pointer-events: none; }
+.sky-fx { inset: 0; }
+
+/* The outer box moves across, the inner one up and down, so each path is a smooth arc. Without
+   motion the sun stays where the painted one used to be and the moon never shows. */
+.sun-x { transform: translate3d(80vw, 0, 0); }
+.sun-y { position: relative; width: 40px; height: 40px; margin: -20px; transform: translate3d(0, 20svh, 0); }
+.sun-y::before, .sun-y::after { content: ""; position: absolute; inset: 0; border-radius: 50%; }
+.sun-y::before { background: #fffdf2; box-shadow: 0 0 30px 14px rgba(255, 236, 170, 0.55), 0 0 90px 40px rgba(255, 226, 150, 0.22); }
+/* Near the horizon a red sun takes over. */
+.sun-y::after { background: #ffb36b; box-shadow: 0 0 30px 14px rgba(255, 150, 80, 0.55), 0 0 90px 40px rgba(255, 120, 60, 0.25); opacity: 0; }
+
+/* fx.js paints today's phase into .moon-disc. */
+.moon-y { width: 34px; height: 34px; margin: -17px; opacity: 0; }
+.moon-disc { width: 34px; height: 34px; border-radius: 50%; box-shadow: 0 0 22px 6px rgba(238, 234, 219, 0.14); }
+
+.meteors, .planes, .birds { opacity: 0; }
+.meteor {
+  position: absolute; width: 150px; height: 2px; border-radius: 2px;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.9));
+  transform-origin: 100% 50%; opacity: 0;
+}
+.cloud {
+  position: absolute; left: 0; width: 200px; height: 80px; opacity: 0.55;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 80'%3E%3Cg fill='%23ffffff'%3E%3Ccircle cx='52' cy='50' r='24'/%3E%3Ccircle cx='86' cy='36' r='30'/%3E%3Ccircle cx='124' cy='44' r='26'/%3E%3Ccircle cx='154' cy='54' r='18'/%3E%3Crect x='40' y='50' width='130' height='26' rx='13'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 100% 100%;
+}
+.plane { position: absolute; top: 11%; left: 0; width: 3px; height: 3px; border-radius: 50%; background: #e8edf3; }
+.plane::after {
+  content: ""; position: absolute; left: 4px; top: 0; width: 3px; height: 3px; border-radius: 50%;
+  background: #ff5a5a; box-shadow: 0 0 6px 2px rgba(255, 90, 90, 0.7);
+}
+/* Birds: a flat silhouette in three frames (wings up, level, down), 40x20 each, shown at half size. */
+.flock { position: absolute; top: 12%; left: 0; width: 160px; height: 70px; }
+.bird { position: absolute; width: 40px; height: 20px; scale: 0.5; }
+.bird i {
+  display: block; width: 40px; height: 20px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 20' fill='%2318222e'%3E%3Cg transform='translate(0 0)'%3E%3Cpath d='M20 11Q14 4 6 1Q12 8 17 12ZM20 11Q26 4 34 1Q28 8 23 12Z'/%3E%3Cpath d='M14 12.5Q20 9.6 27 11.2Q29.4 11 30 12Q28.6 13.4 26 13.2Q20 14.6 14 12.5Z'/%3E%3C/g%3E%3Cg transform='translate(40 0)'%3E%3Cpath d='M20 12Q13 6 3 8Q12 10 17 13ZM20 12Q27 6 37 8Q28 10 23 13Z'/%3E%3Cpath d='M14 12.5Q20 9.6 27 11.2Q29.4 11 30 12Q28.6 13.4 26 13.2Q20 14.6 14 12.5Z'/%3E%3C/g%3E%3Cg transform='translate(80 0)'%3E%3Cpath d='M20 12Q14 15 7 19Q13 13 17 12ZM20 12Q26 15 33 19Q27 13 23 12Z'/%3E%3Cpath d='M14 12.5Q20 9.6 27 11.2Q29.4 11 30 12Q28.6 13.4 26 13.2Q20 14.6 14 12.5Z'/%3E%3C/g%3E%3C/svg%3E") -40px 0 / 120px 20px no-repeat;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sun-x { animation: sun-x var(--cycle) var(--phase) infinite; }
+  .sun-y { animation: sun-y var(--cycle) var(--phase) infinite; }
+  .sun-y::after { animation: sun-red var(--cycle) ease-in-out var(--phase) infinite; }
+  .moon-x { animation: moon-x var(--cycle) linear var(--phase) infinite; }
+  .moon-y { animation: moon-y var(--cycle) var(--phase) infinite; }
+  .meteors, .planes { animation: stars var(--cycle) ease-in-out var(--phase) infinite; }
+  .meteor:nth-child(1) { animation: meteor 17s linear 3s infinite; }
+  .meteor:nth-child(2) { animation: meteor 29s linear 11s infinite; }
+  .meteor:nth-child(3) { animation: meteor 41s linear 23s infinite; }
+  .clouds { animation: clouds-day var(--cycle) ease-in-out var(--phase) infinite; }
+  .cloud:nth-child(1) { animation: cloud-drift 140s linear -20s infinite; }
+  .cloud:nth-child(2) { animation: cloud-drift 190s linear -120s infinite; }
+  .cloud:nth-child(3) { animation: cloud-drift 230s linear -60s infinite; }
+  .plane { animation: plane 90s linear -10s infinite; }
+  .plane::after { animation: blink 1.2s steps(1) infinite; }
+  .birds { animation: birds-dawn var(--cycle) ease-in-out var(--phase) infinite; }
+  .flock { animation: flock var(--cycle) linear var(--phase) infinite; }
+  .bird i { animation: flap 0.7s infinite; }
+  .bird:nth-child(2n) i { animation-delay: -0.2s; }
+  .bird:nth-child(3n) i { animation-delay: -0.45s; }
+  .sun-x, .sun-y, .moon-x, .moon-y, .cloud, .flock { will-change: transform, opacity; }
+}
+/* Without motion the clouds would pile up at the left edge: the still sky keeps none. */
+@media (prefers-reduced-motion: reduce) {
+  .clouds { display: none; }
+}
+
+/* Day is 96%-22% of the loop: the sun rises from the dawn glow on the left, crosses high, sets on
+   the right at sunset and comes back unseen during the night. */
+@keyframes sun-x {
+  0% { transform: translate3d(62vw, 0, 0); }
+  12% { transform: translate3d(76vw, 0, 0); }
+  22% { transform: translate3d(80vw, 0, 0); }
+  50% { transform: translate3d(86vw, 0, 0); }
+  51%, 74% { transform: translate3d(26vw, 0, 0); }
+  100% { transform: translate3d(62vw, 0, 0); }
+}
+@keyframes sun-y {
+  0% { transform: translate3d(0, 15svh, 0); opacity: 1; animation-timing-function: ease-out; }
+  12% { transform: translate3d(0, 13svh, 0); animation-timing-function: ease-in-out; }
+  22% { transform: translate3d(0, 16svh, 0); animation-timing-function: ease-in; }
+  50% { transform: translate3d(0, calc(100svh - 190px), 0); opacity: 1; }
+  52%, 72% { transform: translate3d(0, calc(100svh - 190px), 0); opacity: 0; }
+  74% { transform: translate3d(0, calc(100svh - 190px), 0); opacity: 1; animation-timing-function: ease-out; }
+  100% { transform: translate3d(0, 15svh, 0); opacity: 1; }
+}
+@keyframes sun-red { 0%, 26% { opacity: 0; } 42%, 52% { opacity: 1; } 72%, 82% { opacity: 1; } 94%, 100% { opacity: 0; } }
+/* Night is 44%-81%: the moon rises as the night sky fades in and sets into the dawn. */
+@keyframes moon-x {
+  0%, 44% { transform: translate3d(6vw, 0, 0); }
+  86%, 100% { transform: translate3d(90vw, 0, 0); }
+}
+@keyframes moon-y {
+  0%, 44% { transform: translate3d(0, calc(100svh - 200px), 0); opacity: 0; animation-timing-function: cubic-bezier(0.3, 0.6, 0.5, 1); }
+  47% { opacity: 1; animation-timing-function: cubic-bezier(0.3, 0.6, 0.5, 1); }
+  65% { transform: translate3d(0, 11svh, 0); opacity: 1; animation-timing-function: cubic-bezier(0.5, 0, 0.7, 0.4); }
+  86% { transform: translate3d(0, calc(100svh - 200px), 0); opacity: 1; }
+  88%, 100% { transform: translate3d(0, calc(100svh - 200px), 0); opacity: 0; }
+}
+/* A shooting star crosses in under a second, once per run of its own long animation. */
+@keyframes meteor {
+  0%, 95% { opacity: 0; transform: rotate(150deg) translateX(0); }
+  95.6% { opacity: 1; }
+  98.5%, 100% { opacity: 0; transform: rotate(150deg) translateX(-280px); }
+}
+@keyframes clouds-day { 0%, 22% { opacity: 1; } 40% { opacity: 0.5; } 52%, 76% { opacity: 0; } 92%, 100% { opacity: 1; } }
+@keyframes cloud-drift { from { transform: translate3d(110vw, 0, 0); } to { transform: translate3d(-260px, 0, 0); } }
+@keyframes plane { 0% { transform: translate3d(105vw, 0, 0); } 66%, 100% { transform: translate3d(-5vw, 2svh, 0); } }
+@keyframes blink { 0% { opacity: 1; } 15% { opacity: 0; } }
+/* Birds fly at dawn, 78%-96%: right to left, against the drift of the landscape. */
+@keyframes birds-dawn { 0%, 72% { opacity: 0; } 76%, 94% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes flock {
+  0%, 76% { transform: translate3d(calc(100vw + 20px), 0, 0); }
+  94%, 100% { transform: translate3d(-180px, 14px, 0); }
+}
+/* Wing frames: 0 up, -40px level, -80px down; each keyframe holds until the next. */
+@keyframes flap {
+  0% { background-position: 0 0; animation-timing-function: steps(1); }
+  25% { background-position: -40px 0; animation-timing-function: steps(1); }
+  50% { background-position: -80px 0; animation-timing-function: steps(1); }
+  75% { background-position: -40px 0; animation-timing-function: steps(1); }
+  100% { background-position: 0 0; }
+}
 
 .hero-inner {
   display: flex;

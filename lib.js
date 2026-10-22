@@ -411,6 +411,31 @@
     return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} и ${names[names.length - 1]}`;
   }
 
+  // ---------- The moon on the home banner ----------
+  // The banner's moon shows today's real phase: the moon's age as a share of the lunar month,
+  // 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter. Counted from a known new moon over
+  // the mean synodic month, so it may be off by about a day.
+  const SYNODIC_DAYS = 29.530588853;
+  const NEW_MOON_MS = Date.UTC(2000, 0, 6, 18, 14);
+  function moonAge(ms) {
+    const months = (ms - NEW_MOON_MS) / 86400000 / SYNODIC_DAYS;
+    return ((months % 1) + 1) % 1;
+  }
+
+  // SVG path of the lit part of a moon of radius r centred at (c, c), as seen from the northern
+  // hemisphere: one half of the disc (right while waxing, left while waning) closed by the
+  // terminator, a half ellipse that bulges towards the lit side once the moon is past a quarter.
+  function moonPath(age, c, r) {
+    const rx = Math.abs(Math.cos(2 * Math.PI * age)) * r;
+    const waxing = age < 0.5;
+    const crescent = waxing ? age < 0.25 : age > 0.75;
+    const limb = waxing ? 1 : 0;
+    const sweep = waxing === crescent ? 0 : 1;
+    const n = (x) => +x.toFixed(2);
+    return `M${n(c)} ${n(c - r)}A${n(r)} ${n(r)} 0 0 ${limb} ${n(c)} ${n(c + r)}` +
+      `A${n(rx)} ${n(r)} 0 0 ${sweep} ${n(c)} ${n(c - r)}Z`;
+  }
+
   // The loading globe's dots: every city of places snapped to a step-degree grid, one dot per
   // occupied cell, as [lat, lon] pairs. Continents show through where the game has places.
   function globeCells(places, step = 4) {
@@ -693,7 +718,7 @@
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
     guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
-    NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells,
+    NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells, moonAge, moonPath,
     parseRoomSeat, reconnectDelay, tileAt, tileNeighbours, tilePointToLatLon, decodeMvtLayer,
     MAPILLARY_MIN_QUALITY, mapillarySequenceCandidates, mapillaryGraphPlace, prewarmId,
   };

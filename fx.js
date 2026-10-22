@@ -1,4 +1,5 @@
-// Visual effects of MonGuess: number reels, confetti, the winner screen and the loading globe.
+// Visual effects of MonGuess: number reels, confetti, the winner screen, the loading globe and
+// the banner's moon.
 // DOM and canvas only: no network and no game state; app.js decides when each one plays.
 // Under prefers-reduced-motion every effect becomes a still picture or nothing.
 // The browser gets these as window.MGFX.
@@ -320,5 +321,16 @@
     return () => cancelAnimationFrame(frameId);
   }
 
-  window.MGFX = { spinReels, burst, showWinner, startGlobe };
+  // ---------- Banner moon ----------
+
+  // Paints the banner's moon into el: the lit part (an SVG path for a 34 px moon of radius 16,
+  // from moonPath in lib.js) over a faint full disc, as the dark side catches earthlight.
+  function paintMoon(el, litPath) {
+    const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'>" +
+      "<circle cx='17' cy='17' r='16' fill='#eeeadb' fill-opacity='0.1'/>" +
+      `<path d='${litPath}' fill='#eeeadb'/></svg>`;
+    el.style.background = `url("data:image/svg+xml,${encodeURIComponent(svg)}") 0 0 / 100% 100%`;
+  }
+
+  window.MGFX = { spinReels, burst, showWinner, startGlobe, paintMoon };
 })();
