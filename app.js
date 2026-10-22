@@ -6,7 +6,8 @@ const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, forgivenessKm, formatKm,
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
-  guessedStatus, secondsLeft, roomResultRows, roomFinalRows,
+  guessedStatus, secondsLeft, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText, parseRoomSeat,
+  reconnectDelay,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
@@ -222,7 +223,7 @@ function postLog(beacon = false) {
       id: state.logId,
       startedAt: state.startedAt,
       buildMs: state.buildMs,
-      name: cleanName($('player-name').value),
+      name: cleanName(state.room ? room.name : $('player-name').value),
       settings: state.settings,
       challenge: state.challenge,
       rounds: state.rounds,
@@ -425,16 +426,20 @@ function nameMissing() {
 // ---------- Комната: игра с друзьями вживую ----------
 
 // Один сокет на комнату: подключиться, отправить JSON, разобрать ответ по type в roomHandlers.
-// Протокол сообщений описан в начале rooms/rules.js. playerId пока живёт только в памяти:
-// перезагрузка страницы входит в комнату новым игроком.
+// Протокол сообщений описан в начале rooms/rules.js. Своё место в комнате (playerId и имя)
+// браузер помнит в localStorage: перезагрузка или та же ссылка возвращают на то же место,
+// а оборванная связь восстанавливается сама.
 // Игра в комнате: index и place — текущий раунд, guessed — свой ответ уже отправлен, endsAt —
 // конец таймера, nextAt — старт следующего раунда, table — таблица очков из последнего
 // сообщения комнаты, notice — сбой, который показать вместо «Ответили N из M».
 // kinds и search знает только создатель комнаты: как нашлись снимки и настройки поиска, для лога.
+// name — имя, с которым вошли. joined — на текущем сокете уже пришло state; retries — сколько
+// раз подряд переподключались, retry — таймер следующей попытки.
 const room = {
-  id: '', playerId: '', ws: null, phase: '', settings: null, roundsTotal: 0, players: [],
+  id: '', playerId: '', name: '', ws: null, phase: '', settings: null, roundsTotal: 0, players: [],
   index: -1, place: null, guessed: false, endsAt: null, nextAt: null, table: [], notice: '',
   loggedIndex: -1, tick: null, kinds: new Map(), search: null,
+  joined: false, retries: 0, retry: null,
 };
 
 const randomId = (length) => idFromBytes(crypto.getRandomValues(new Uint8Array(length)));
@@ -446,6 +451,24 @@ const ROOM_ERRORS = {
   started: 'Игра уже началась.',
 };
 const roomErrorText = (msg) => ROOM_ERRORS[msg.code] || `Комната не приняла запрос: ${msg.message}`;
+const ROOM_LOST = 'Связь с комнатой потеряна. Обновите страницу, чтобы войти снова.';
+const ROOM_RECONNECTING = 'Переподключение…';
+// Отказы, после которых запомненное место бесполезно: комнаты нет или такого игрока не бывает.
+const SEAT_GONE = ['no-room', 'bad-player'];
+
+// Место в комнате id, запомненное в браузере, или null. Хранилище может быть недоступно
+// (приватный режим): тогда место просто не помнится.
+function loadSeat(id) {
+  try { return parseRoomSeat(localStorage.getItem(roomSeatKey(id))); } catch { return null; }
+}
+
+function saveSeat() {
+  try { localStorage.setItem(roomSeatKey(room.id), roomSeatText(room)); } catch { /* хранилище недоступно */ }
+}
+
+function forgetSeat(id) {
+  try { localStorage.removeItem(roomSeatKey(id)); } catch { /* хранилище недоступно */ }
+}
 
 // true, если сообщение ушло.
 function roomSend(msg) {
@@ -454,14 +477,20 @@ function roomSend(msg) {
   return true;
 }
 
-// Открыть сокет комнаты id и первым сообщением отправить first (create или join).
+// Войти в комнату id: первым сообщением отправить first (create или join).
 // Пока не пришло первое state, игрок ещё на экране загрузки: сбой возвращает его в меню.
 function roomConnect(id, first) {
-  room.id = id;
-  room.playerId = first.playerId;
-  room.phase = '';
-  const ws = new WebSocket(roomSocketUrl(location, id));
+  clearTimeout(room.retry);
+  Object.assign(room, { id, playerId: first.playerId, name: cleanName(first.name), phase: '', retries: 0, retry: null });
+  roomOpen(first);
+}
+
+// Открыть сокет комнаты room.id и отправить first. Сокет, который закрыли не мы (сеть, сервер),
+// посреди игры переподключается сам.
+function roomOpen(first) {
+  const ws = new WebSocket(roomSocketUrl(location, room.id));
   room.ws = ws;
+  room.joined = false;
   ws.onopen = () => roomSend(first);
   ws.onmessage = (e) => {
     let msg;
@@ -472,22 +501,63 @@ function roomConnect(id, first) {
     if (room.ws !== ws) return; // закрыли сами
     room.ws = null;
     if (!room.phase) fail('Не удалось подключиться к комнате. Проверьте интернет и попробуйте ещё раз.');
-    else roomLost('Связь с комнатой потеряна. Обновите страницу, чтобы войти снова.');
+    else roomReconnect();
   };
+}
+
+// Связь оборвалась посреди игры: пробовать снова через 1, 2, 4, 8 с, потом каждые 10 с;
+// через 2 минуты — связь потеряна. После итогов игры ждать от комнаты больше нечего.
+function roomReconnect() {
+  if (room.phase === 'final') return;
+  const delay = reconnectDelay(room.retries);
+  if (delay === null) {
+    room.retry = null;
+    roomLost(ROOM_LOST);
+    return;
+  }
+  room.retries++;
+  roomLost(ROOM_RECONNECTING);
+  room.retry = setTimeout(() => {
+    room.retry = null;
+    roomOpen({ type: 'join', playerId: room.playerId, name: room.name });
+  }, delay);
+}
+
+// Ссылка на комнату, где браузер уже сидел: сразу войти на своё место, без меню и без имени.
+// true, если вход начался. Не пустят — место забывается, и вход идёт как обычно, через меню.
+function resumeRoom(id) {
+  const seat = loadSeat(id);
+  if (!seat) return false;
+  show('loading');
+  $('loading-text').textContent = 'Возвращаюсь в комнату…';
+  roomConnect(id, { type: 'join', ...seat });
+  return true;
 }
 
 // Сообщение state приходит при входе: по фазе сразу рисуем нужный экран, в том числе тому,
 // кто вошёл посреди игры.
+// После переподключения state приходит снова: тот же раунд не перерисовывается (панорама и
+// метка на карте остаются), только снимается или ставится замок ответа.
 const roomHandlers = {
   state(msg) {
     const entering = !room.phase;
+    const sameRound = !entering && msg.phase === 'round' && room.phase === 'round' && msg.index === room.index;
     Object.assign(room, {
       phase: msg.phase, settings: msg.settings, roundsTotal: msg.roundsTotal, players: msg.players, table: msg.table,
+      joined: true, retries: 0,
     });
+    const me = msg.players.find((p) => p.playerId === room.playerId);
+    if (me) saveSeat(); // в законченную игру новичка не сажают: запоминать нечего
     if (entering) history.replaceState(null, '', roomLink(pageBase(), room.id));
-    if (msg.phase === 'lobby') showLobby();
+    $('lobby-error').textContent = '';
+    if (msg.phase !== 'final') room.tick ??= setInterval(roomTick, 250);
+    if (sameRound) {
+      Object.assign(room, { endsAt: msg.endsAt, notice: '' });
+      lockRoomGuess(Boolean(me?.guessed));
+      renderRoomStatus();
+      roomTick();
+    } else if (msg.phase === 'lobby') showLobby();
     else if (msg.phase === 'round') {
-      const me = msg.players.find((p) => p.playerId === room.playerId);
       showRoomRound({ index: msg.index, place: msg.place, endsAt: msg.endsAt, guessed: Boolean(me?.guessed) });
     } else if (msg.phase === 'results') showRoomResults({ ...msg.results, nextAt: msg.nextAt });
     else showRoomFinal();
@@ -526,6 +596,15 @@ const roomHandlers = {
     }
   },
   error(msg) {
+    if (room.phase && !room.joined) {
+      // Обратно в комнату не пустили (например, она истекла): переподключение бессмысленно.
+      const ws = room.ws;
+      room.ws = null;
+      ws?.close();
+      if (SEAT_GONE.includes(msg.code)) forgetSeat(room.id);
+      roomLost(ROOM_LOST);
+      return;
+    }
     if (room.phase === 'round') {
       room.notice = roomErrorText(msg);
       renderRoomStatus();
@@ -539,6 +618,7 @@ const roomHandlers = {
     const ws = room.ws;
     room.ws = null;
     ws?.close();
+    if (SEAT_GONE.includes(msg.code)) forgetSeat(room.id);
     if (msg.code === 'no-room') leaveRoomLink();
     fail(roomErrorText(msg));
   },
@@ -571,7 +651,8 @@ function joinRoom(id) {
   $('menu-error').textContent = '';
   show('loading');
   $('loading-text').textContent = 'Вхожу в комнату…';
-  roomConnect(id, { type: 'join', playerId: room.playerId || randomId(16), name: cleanName($('player-name').value) });
+  const playerId = loadSeat(id)?.playerId || room.playerId || randomId(16);
+  roomConnect(id, { type: 'join', playerId, name: cleanName($('player-name').value) });
 }
 
 function showLobby() {
@@ -609,10 +690,11 @@ const myRoomTotal = () => room.table.find((r) => r.playerId === room.playerId)?.
 // итогов раунда, в HUD — сколько игроков ответило и, в режиме таймера, сколько секунд осталось.
 async function showRoomRound({ index, place, endsAt, guessed }) {
   Object.assign(room, { index, place, endsAt, guessed: false, nextAt: null, notice: '' });
-  // Лог игры в комнате начинается с первого увиденного раунда.
+  // Лог игры в комнате начинается с первого увиденного раунда. Кто вошёл позже или вернулся
+  // после перезагрузки, сыграет только оставшиеся раунды: их и ждёт запись, чтобы считаться законченной.
   if (state.room !== room.id) {
     const search = room.search;
-    beginLog(search && { sources: search.sources, spheres: search.spheres, rounds: search.count }, room.id, room.roundsTotal);
+    beginLog(search && { sources: search.sources, spheres: search.spheres, rounds: search.count }, room.id, room.roundsTotal - index);
     postLog();
   }
   state.index = index; // номер раунда для ошибок панорамы в логе
@@ -648,7 +730,7 @@ function roomGuess() {
   if (!guessMarker || room.guessed) return;
   const ll = guessMarker.getLatLng();
   if (roomSend({ type: 'guess', round: room.index, lat: ll.lat, lon: ll.lng })) lockRoomGuess(true);
-  else roomLost('Связь с комнатой потеряна. Обновите страницу, чтобы войти снова.');
+  else roomLost(room.retry || (room.ws && !room.joined) ? ROOM_RECONNECTING : ROOM_LOST);
 }
 
 function renderRoomStatus() {
@@ -929,6 +1011,7 @@ async function init() {
     $('play-friends').hidden = true;
   }
   if (roomId) {
+    resumeRoom(roomId);
     $('challenge-note').textContent = 'Вас позвали в комнату: впишите имя и войдите.';
     $('challenge-note').hidden = false;
     $('landing').hidden = true;
