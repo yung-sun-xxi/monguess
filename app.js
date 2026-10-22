@@ -8,8 +8,10 @@ const {
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
   guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
-  parseRoomSeat, reconnectDelay,
+  parseRoomSeat, reconnectDelay, NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells,
 } = window.MG;
+// Анимации (барабаны, конфетти, экран победителя, глобус загрузки) живут в fx.js.
+const FX = window.MGFX;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
 const BATCHES_PER_COUNTRY = 2;
@@ -331,6 +333,28 @@ function postLog(beacon = false) {
 function show(id) {
   for (const s of ['menu', 'loading', 'lobby', 'game', 'result', 'final']) $(s).hidden = s !== id;
   if (id !== 'menu') closeSetup();
+  // Глобус крутится, только пока виден экран загрузки.
+  if (id === 'loading') stopGlobe ??= FX.startGlobe($('loader-globe'), globeDots);
+  else {
+    stopGlobe?.();
+    stopGlobe = null;
+  }
+}
+
+let stopGlobe = null;
+let dots = null;
+// Точки глобуса — города из places.json; пока файл не загрузился, глобус крутится без них.
+const globeDots = () => (dots ??= places && globeCells(places));
+
+// Очки раунда на панели итогов: число крутится барабаном. Возвращает, через сколько мс оно встанет.
+function showPoints(points) {
+  const el = $('result-points');
+  const reels = document.createElement('span');
+  reels.className = 'reels';
+  reels.setAttribute('aria-hidden', 'true');
+  el.replaceChildren('+', reels, ' очков');
+  el.setAttribute('aria-label', `+${points.toLocaleString('ru')} очков`);
+  return FX.spinReels(reels, points);
 }
 
 // Окно новой игры поверх главной. Пока оно открыто, страница под ним не прокручивается.
@@ -471,7 +495,9 @@ function showResult(round, guess) {
   $('result-country').textContent = `${flag(round.cc)} ${countryName(round.cc)}`;
   $('result-distance').textContent = `Вы ошиблись на ${formatKm(guess.km)}`;
   showBonus(sizeBonusText(guess.bonus));
-  $('result-points').textContent = `+${guess.points.toLocaleString('ru')} очков`;
+  const spun = showPoints(guess.points);
+  // Своя игра: победителя раунда нет, хлопушка — за почти точный ответ, когда число встанет.
+  if (guess.points >= NEAR_PERFECT) setTimeout(() => FX.burst($('result-points')), spun);
   const last = state.index + 1 >= state.rounds.length;
   $('next').textContent = last ? 'Итоги' : 'Следующий раунд';
   $('room-next').hidden = last;
@@ -500,7 +526,22 @@ function showFinal() {
   postLog();
   show('final');
   const max = state.rounds.length * MAX_POINTS;
-  $('final-total').textContent = `${total().toLocaleString('ru')} из ${max.toLocaleString('ru')}`;
+  // Сначала экран победителя под конфетти, потом сумма: она крутится барабаном, пока очки раундов
+  // вылетают в строку.
+  const sum = document.createElement('span');
+  sum.className = 'reels';
+  sum.setAttribute('aria-hidden', 'true');
+  $('final-total').replaceChildren(sum, ` из ${max.toLocaleString('ru')}`);
+  $('final-total').setAttribute('aria-label', `${total().toLocaleString('ru')} из ${max.toLocaleString('ru')}`);
+  const chips = state.guesses.map((g) => Object.assign(document.createElement('span'), {
+    textContent: `+${g.points.toLocaleString('ru')}`,
+  }));
+  $('final-rounds').replaceChildren(...chips);
+  $('final-rounds').hidden = false;
+  FX.showWinner({ label: 'Итог игры', name: cleanName($('player-name').value), points: `${total().toLocaleString('ru')} очков` }, () => {
+    FX.spinReels(sum, total(), { first: 1.2, step: 0.2 });
+    chips.forEach((chip, i) => setTimeout(() => chip.classList.add('in'), 150 + i * 260));
+  });
   $('final-table').innerHTML = '';
   state.rounds.forEach((r, i) => {
     const g = state.guesses[i];
@@ -576,7 +617,7 @@ function nameMissing() {
 const freshRoom = () => ({
   id: '', playerId: '', name: '', ws: null, phase: '', settings: null, roundsTotal: 0, players: [],
   index: -1, place: null, guessed: false, endsAt: null, nextAt: null, table: [], notice: '',
-  loggedIndex: -1, tick: null, kinds: new Map(), search: null,
+  loggedIndex: -1, cheered: -1, tick: null, kinds: new Map(), search: null,
   joined: false, retries: 0, retry: null,
 });
 const room = freshRoom();
@@ -949,8 +990,17 @@ function showRoomResults(msg) {
   $('result-distance').textContent = answered ? `Вы ошиблись на ${formatKm(mine.km)}` : 'Вы не ответили в этом раунде';
   // В классической комнате forgiveKm каждого раунда 0, так что прибавки нет.
   showBonus(sizeBonusText(answered ? sizeBonus(mine.km, place.forgiveKm) : 0));
-  $('result-points').textContent = `+${(mine?.points ?? 0).toLocaleString('ru')} очков`;
-  renderRoomResultsTable(rows);
+  showPoints(mine?.points ?? 0);
+  const winners = roundWinners(msg.guesses);
+  renderRoomResultsTable(rows, winners);
+  // Хлопушка из строки победителя раунда — один раз: после переподключения тот же раунд
+  // рисуется снова, но без неё.
+  if (msg.index !== room.cheered) {
+    room.cheered = msg.index;
+    setTimeout(() => {
+      for (const cell of $('room-results').querySelectorAll('tr.win td:first-child')) FX.burst(cell);
+    }, 300);
+  }
   const last = msg.nextAt === null;
   $('room-next').hidden = last;
   $('next').textContent = 'Итоги';
@@ -978,7 +1028,7 @@ function showRoomResults(msg) {
   resultMap.fitBounds(points, { paddingTopLeft: [60, 60], paddingBottomRight: [60, below], maxZoom: 10 });
 }
 
-function renderRoomResultsTable(rows) {
+function renderRoomResultsTable(rows, winners) {
   const t = $('room-results');
   t.innerHTML = '';
   t.hidden = false;
@@ -988,7 +1038,12 @@ function renderRoomResultsTable(rows) {
   for (const r of rows) {
     const row = body.insertRow();
     if (r.you) row.className = 'you';
-    row.insertCell().textContent = r.name;
+    const name = row.insertCell();
+    name.textContent = r.name;
+    if (winners.includes(r.playerId)) {
+      row.classList.add('win');
+      name.append(Object.assign(document.createElement('span'), { className: 'trophy', textContent: '🏆' }));
+    }
     row.insertCell().textContent = r.distance;
     row.insertCell().textContent = `+${r.points.toLocaleString('ru')}`;
     row.insertCell().textContent = r.total.toLocaleString('ru');
@@ -1013,6 +1068,16 @@ function showRoomFinal() {
   stopRoomTick();
   show('final');
   $('final-total').textContent = 'Итоги комнаты';
+  $('final-total').removeAttribute('aria-label');
+  $('final-rounds').hidden = true;
+  const winners = gameWinners(room.table);
+  if (winners.length) {
+    FX.showWinner({
+      label: winners.length > 1 ? 'Победители' : 'Победитель',
+      name: joinNames(winners.map((w) => w.name)),
+      points: `${winners[0].total.toLocaleString('ru')} очков`,
+    });
+  }
   $('copy-link').hidden = true;
   $('copy-result').hidden = true;
   $('copied').hidden = true;

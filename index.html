@@ -198,7 +198,7 @@
   </section>
 
   <section id="loading" class="screen" hidden>
-    <div class="spinner"></div>
+    <canvas id="loader-globe" aria-hidden="true"></canvas>
     <p id="loading-text"></p>
   </section>
 
@@ -250,6 +250,7 @@
 
   <section id="final" class="screen" hidden>
     <h1 id="final-total"></h1>
+    <div id="final-rounds" hidden></div>
     <table id="final-table"></table>
     <div class="buttons">
       <button id="copy-link" class="primary">Ссылка для друзей — те же места</button>
@@ -269,11 +270,20 @@
     </div>
   </dialog>
 
+  <!-- Экран победителя в конце игры: имя на весь экран под конфетти, fx.js показывает его на
+       3,5 с, клик закрывает раньше. Вне экранов, как и окно выше. -->
+  <div id="winner" hidden>
+    <small class="winner-label"></small>
+    <strong class="winner-name"></strong>
+    <span class="winner-points"></span>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
   <!-- mapillary-js (1 МБ) app.js грузит сам, только когда нужна панорама Mapillary. -->
   <script src="lib.js"></script>
   <script src="config.js"></script>
+  <script src="fx.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

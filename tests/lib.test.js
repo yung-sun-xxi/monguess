@@ -573,3 +573,20 @@ test('nameError: a name is required before a game starts', () => {
   assert.equal(MG.nameError(null), NAME_REQUIRED);
   assert.equal(MG.nameError(undefined), NAME_REQUIRED);
 });
+
+test('globeCells: cities snap to a grid, one cell per occupied square, every country counted', () => {
+  const places = { PT: [[38.72, -9.14, 500000], [38.9, -9.0, 1000]], JP: [[35.68, 139.69, 9000000]] };
+  assert.deepEqual(MG.globeCells(places), [[40, -8], [36, 140]]);
+  assert.deepEqual(MG.globeCells(places, 1), [[39, -9], [36, 140]]);
+  assert.deepEqual(MG.globeCells({}), []);
+});
+
+test('globeCells: the real places.json gives a dotted world of about a thousand cells', () => {
+  const cells = MG.globeCells(require('../data/places.json'));
+  assert.ok(cells.length > 800 && cells.length < 1600, `${cells.length} cells`);
+  for (const [lat, lon] of cells) assert.ok(Math.abs(lat) <= 92 && Math.abs(lon) <= 180);
+});
+
+test('NEAR_PERFECT: solo confetti starts at 4 900 points', () => {
+  assert.equal(MG.NEAR_PERFECT, 4900);
+});

@@ -391,6 +391,44 @@
     });
   }
 
+  // A round this good gets confetti in a solo game, where nobody else can win the round.
+  const NEAR_PERFECT = 4900;
+
+  // Who won a room round: every player with the round's best points. Nobody when the best is 0.
+  function roundWinners(guesses) {
+    const best = Math.max(0, ...guesses.map((g) => g.points));
+    return best > 0 ? guesses.filter((g) => g.points === best).map((g) => g.playerId) : [];
+  }
+
+  // Who won the room: every player with the best total, as { name, total }. Nobody when it is 0.
+  function gameWinners(table) {
+    const best = Math.max(0, ...table.map((row) => row.total));
+    return best > 0 ? table.filter((row) => row.total === best).map(({ name, total }) => ({ name, total })) : [];
+  }
+
+  // Names for one line of text: "Аня", "Аня и Миша", "Аня, Миша и Лена".
+  function joinNames(names) {
+    return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} и ${names[names.length - 1]}`;
+  }
+
+  // The loading globe's dots: every city of places snapped to a step-degree grid, one dot per
+  // occupied cell, as [lat, lon] pairs. Continents show through where the game has places.
+  function globeCells(places, step = 4) {
+    const seen = new Set();
+    const cells = [];
+    for (const list of Object.values(places)) {
+      for (const [lat, lon] of list) {
+        const cell = [Math.round(lat / step) * step, Math.round(lon / step) * step];
+        const key = cell.join();
+        if (!seen.has(key)) {
+          seen.add(key);
+          cells.push(cell);
+        }
+      }
+    }
+    return cells;
+  }
+
   // A playerId as the room server accepts it (rooms/rules.js).
   const PLAYER_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -647,6 +685,7 @@
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
     guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
+    NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells,
     parseRoomSeat, reconnectDelay, tileAt, tileNeighbours, tilePointToLatLon, decodeMvtLayer,
     MAPILLARY_MIN_QUALITY, mapillarySequenceCandidates, mapillaryGraphPlace,
   };
