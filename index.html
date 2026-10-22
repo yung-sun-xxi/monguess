@@ -12,36 +12,82 @@
 </head>
 <body>
   <section id="menu" class="screen">
-    <h1>🌍 MonGuess</h1>
-    <p class="sub">Игра в духе GeoGuessr по всем странам мира: вы на улице где-то на планете — угадайте, где.</p>
 
-    <div id="challenge-note" class="note" hidden></div>
+    <header class="hero landing-part">
+      <!-- The strip behind the banner: four skies over one day, stars, far ridges, five places
+           (desert, alpine village, city, tropical coast, snowy north) with their lit windows,
+           and the roadside foreground. Each layer slides left at its own speed. -->
+      <div class="pano" aria-hidden="true">
+        <div class="sky sky-sunset"></div>
+        <div class="sky sky-night"></div>
+        <div class="sky sky-dawn"></div>
+        <div class="stars"></div>
+        <div class="layer far"></div>
+        <div class="layer places"></div>
+        <div class="layer places lit"></div>
+        <div class="layer fg"></div>
+        <div class="layer fg lit"></div>
+      </div>
+      <div class="compass" aria-hidden="true"><div class="compass-tape"></div></div>
+      <div class="hero-inner">
+        <h1 class="hero-title">MonGuess</h1>
+        <p class="hero-tagline">Угадайте, где вы: улица в любой стране мира</p>
+        <a class="hero-cta" href="#" data-open-setup>Играть</a>
+      </div>
+    </header>
 
-    <div id="menu-body">
-      <label id="player-name-label" for="player-name">Ваше имя
-        <input id="player-name" type="text" maxlength="20" autocomplete="nickname"
-               required spellcheck="false">
-      </label>
+    <section id="about" class="about landing-part">
+      <section id="how-to">
+        <h2>Как играть</h2>
+        <ol class="steps">
+          <li><b>Оглядитесь</b> Вы стоите на улице в случайной стране. Оглядитесь, пройдитесь, ищите подсказки.</li>
+          <li><b>Отметьте на карте</b> Поставьте точку на карте там, где вы, по-вашему, находитесь.</li>
+          <li><b>Получите очки</b> Чем ближе, тем больше очков: до 5000 за раунд.</li>
+        </ol>
+      </section>
 
-      <button id="start" class="primary">Играть</button>
-      <button id="play-friends">Играть с друзьями</button>
-      <button id="new-instead" class="link" hidden>или начать свою игру</button>
-      <p id="menu-error" class="error"></p>
+      <section id="why">
+        <h2>Чем MonGuess лучше</h2>
+        <ul class="perks">
+          <li><span class="perk-stat">219 стран</span><b>Весь мир</b>
+            219 из 226 стран и территорий. У GeoGuessr и бесплатных клонов — около 90–125.</li>
+          <li><span class="perk-stat">1 из 219</span><b>Равный шанс</b>
+            Маленькая страна выпадает так же часто, как большая.</li>
+          <li><span class="perk-stat">0 ₽</span><b>Бесплатно, без аккаунта</b>
+            Ввели имя — и играете.</li>
+          <li><span class="perk-stat">1 ссылка</span><b>Игра с друзьями</b>
+            После игры скопируйте ссылку: друг сыграет те же места.</li>
+          <li><span class="perk-stat">до 300 км</span><b>Без штрафа за размер</b>
+            В большой стране часть промаха прощается — до 300 км.</li>
+        </ul>
+      </section>
 
-      <!-- Главная для нового игрока. По ссылке друга или в комнату app.js прячет её целиком. -->
-      <div id="landing">
-        <section id="how-to" class="help">
-          <h2>Как играть</h2>
-          <ol>
-            <li>Вы стоите на улице в случайной стране. Оглядитесь, пройдитесь, ищите подсказки.</li>
-            <li>Поставьте точку на карте там, где вы, по-вашему, находитесь.</li>
-            <li>Чем ближе, тем больше очков: до 5000 за раунд.</li>
-          </ol>
-        </section>
+      <p class="about-cta"><a class="hero-cta" href="#" data-open-setup>Играть</a></p>
+    </section>
+    <!-- Окно новой игры: кнопки «Играть» на главной открывают его поверх страницы. По ссылке друга
+         или в комнату app.js прячет #landing (настройки): остаются записка, имя и «Играть». -->
+    <section id="setup" class="setup" aria-labelledby="setup-title">
+      <div class="setup-card">
+        <button class="setup-back" type="button" aria-label="Назад на главную">←</button>
+        <h2 id="setup-title" class="setup-title">Новая игра</h2>
+        <div id="challenge-note" class="note" hidden></div>
 
-        <details id="settings">
-          <summary>Настройки</summary>
-          <div id="options">
+        <!-- Кто играет: переключатель меняет нижнюю часть окна и главную кнопку. -->
+        <div class="who" role="radiogroup" aria-label="Кто играет">
+          <input type="radio" name="who" id="who-solo" value="solo" checked>
+          <label for="who-solo">Одному</label>
+          <input type="radio" name="who" id="who-friends" value="friends">
+          <label for="who-friends">С друзьями</label>
+        </div>
+
+        <div id="menu-body">
+          <label id="player-name-label" for="player-name">Ваше имя
+            <input id="player-name" type="text" maxlength="20" autocomplete="nickname"
+                   required spellcheck="false">
+          </label>
+
+          <div id="landing">
+            <div id="options">
             <label>Раундов
               <select id="rounds">
                 <option>3</option>
@@ -59,49 +105,66 @@
                 <option value="any">Любые, даже одна точка</option>
               </select>
             </label>
-            <label>Режим игры с друзьями
-              <select id="room-mode">
-                <option value="none" selected>Без времени — раунд идёт, пока все не ответят</option>
-                <option value="timer">Таймер после первого ответа</option>
-              </select>
-            </label>
-            <label id="room-timer-label" hidden>Секунд после первого ответа
-              <select id="room-timer">
-                <option>15</option>
-                <option selected>30</option>
-                <option>60</option>
-                <option>120</option>
-              </select>
-            </label>
             <p id="mapillary-note" class="note" hidden>
               Mapillary сейчас не отдаёт снимки (сбой на их стороне), поэтому места с ним ищутся медленно.
               Пока лучше выбрать «Только Google».
             </p>
           </div>
 
-          <div id="settings-help" class="help">
-            <p><b>Снимки</b> — откуда берутся места.</p>
-            <ul>
-              <li><b>Google</b> — панорамы Google Street View, их снимают машины Google. Лучшее качество, но
-                есть не во всех странах: в Африке и Средней Азии их мало.</li>
-              <li><b>Mapillary</b> — бесплатный сервис, куда люди сами выкладывают фото улиц с телефонов
-                и видеорегистраторов. Есть почти в любой стране, качество разное.</li>
-              <li><b>Google + Mapillary</b> — сначала Google, а где его нет — Mapillary.</li>
-            </ul>
-            <p><b>Фотосферы людей</b> — панорамы 360°, которые обычные люди снимают телефоном и выкладывают
-              в Google Карты. Выручают там, где машины Google не ездили.</p>
-            <ul>
-              <li><b>Нет</b> — только панорамы машин Google.</li>
-              <li><b>Только где можно ходить</b> — фотосфера должна быть связана с соседними, чтобы можно
-                было пройтись.</li>
-              <li><b>Любые</b> — даже одиночный снимок: можно только оглядеться, но не сдвинуться.</li>
-            </ul>
-            <p><b>Режим игры с друзьями</b> — только для комнаты: либо раунд ждёт всех, либо после первого
-              ответа остальным даётся столько секунд, сколько выбрано.</p>
+            <!-- Только для игры с друзьями. -->
+            <fieldset class="friends-only room-mode">
+              <legend>Как идут раунды</legend>
+              <label class="mode-card">
+                <input type="radio" name="room-mode" value="none" checked>
+                <span><b>Без спешки</b>Раунд ждёт, пока ответят все.</span>
+              </label>
+              <label class="mode-card">
+                <input type="radio" name="room-mode" value="timer">
+                <span><b>На время</b>После первого ответа у остальных
+                  <select id="room-timer" aria-label="Секунд на ответ">
+                    <option>15</option>
+                    <option selected>30</option>
+                    <option>60</option>
+                    <option>120</option>
+                  </select> с.</span>
+              </label>
+            </fieldset>
+
+            <details id="settings">
+              <summary>Что значат настройки</summary>
+              <div id="settings-help" class="help">
+                <p><b>Снимки</b> — откуда берутся места.</p>
+                <ul>
+                  <li><b>Google</b> — панорамы Google Street View, их снимают машины Google. Лучшее качество, но
+                    есть не во всех странах: в Африке и Средней Азии их мало.</li>
+                  <li><b>Mapillary</b> — бесплатный сервис, куда люди сами выкладывают фото улиц с телефонов
+                    и видеорегистраторов. Есть почти в любой стране, качество разное.</li>
+                  <li><b>Google + Mapillary</b> — сначала Google, а где его нет — Mapillary.</li>
+                </ul>
+                <p><b>Фотосферы людей</b> — панорамы 360°, которые обычные люди снимают телефоном и выкладывают
+                  в Google Карты. Выручают там, где машины Google не ездили.</p>
+                <ul>
+                  <li><b>Нет</b> — только панорамы машин Google.</li>
+                  <li><b>Только где можно ходить</b> — фотосфера должна быть связана с соседними, чтобы можно
+                    было пройтись.</li>
+                  <li><b>Любые</b> — даже одиночный снимок: можно только оглядеться, но не сдвинуться.</li>
+                </ul>
+              </div>
+            </details>
           </div>
-        </details>
+
+          <div class="setup-actions">
+            <button id="start" class="primary solo-only">Играть</button>
+            <button id="play-friends" class="primary friends-only">Создать комнату</button>
+          </div>
+          <button id="new-instead" class="link" hidden>или начать свою игру</button>
+          <p id="menu-error" class="error"></p>
+
+          <p class="setup-link friends-only">Дадим ссылку на комнату: друзья зайдут по ней и сыграют с вами те же места.</p>
+        </div>
       </div>
-    </div>
+    </section>
+
   </section>
 
   <section id="loading" class="screen" hidden>
