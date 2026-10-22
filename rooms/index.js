@@ -73,7 +73,19 @@ export class Room extends DurableObject {
   async apply(event) {
     const storage = this.ctx.storage;
     const before = (await storage.get('state')) ?? null;
-    const { state, out, alarmAt } = step(before, event, Date.now());
+    const now = Date.now();
+    // A player stored as connected with no open socket left without a close event (the
+    // runtime restarted or dropped the socket): they leave now, so the grace counts from here.
+    let current = before;
+    const out = [];
+    for (const playerId of this.vanished(before, event)) {
+      const left = step(current, { type: 'leave', playerId }, now);
+      current = left.state;
+      out.push(...left.out);
+    }
+    const result = step(current, event, now);
+    const { state, alarmAt } = result;
+    out.push(...result.out);
     if (state) {
       if (state !== before) await storage.put('state', state);
     } else if (before) {
@@ -92,6 +104,16 @@ export class Room extends DurableObject {
     if (alarmAt === null) await storage.deleteAlarm();
     else await storage.setAlarm(alarmAt);
     this.deliver(out, state);
+  }
+
+  // The leave being applied is not counted twice.
+  vanished(state, event) {
+    if (!state) return [];
+    const open = new Set(this.ctx.getWebSockets()
+      .filter((ws) => ws.readyState === WebSocket.OPEN)
+      .map((ws) => ws.deserializeAttachment()?.playerId));
+    return Object.entries(state.players).filter(([id, p]) => p.connected && !open.has(id) && !(event.type === 'leave' && event.playerId === id))
+      .map(([id]) => id);
   }
 
   deliver(out, state) {
