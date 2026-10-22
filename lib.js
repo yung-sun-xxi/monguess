@@ -76,8 +76,9 @@
   const FORGIVE_CAP_KM = 300;
 
   // How spread out a country's places are: the median distance from them to their centroid,
-  // at most 300 km. scoreFor stretches its curve by it in size-aware scoring. The centroid is the mean of unit vectors, not of degrees, so a country
-  // across the antimeridian (Fiji) is not centred on the other side of the planet.
+  // at most 300 km. scoreFor stretches its curve by it in size-aware scoring. The centroid is
+  // the mean of unit vectors, not of degrees, so a country across the antimeridian (Fiji) is
+  // not centred on the other side of the planet.
   function forgivenessKm(list) {
     if (!list || list.length < 2) return 0;
     const rad = (d) => (d * Math.PI) / 180;
