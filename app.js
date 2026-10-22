@@ -245,12 +245,26 @@ function postLog(beacon = false) {
 
 function show(id) {
   for (const s of ['menu', 'loading', 'lobby', 'game', 'result', 'final']) $(s).hidden = s !== id;
+  if (id !== 'menu') closeSetup();
 }
 
+// Окно новой игры поверх главной. Пока оно открыто, страница под ним не прокручивается.
+function openSetup() {
+  document.documentElement.classList.add('setup-open');
+}
+
+function closeSetup() {
+  document.documentElement.classList.remove('setup-open');
+}
+
+// Ошибка видна в окне новой игры, рядом с кнопкой, которая к ней привела.
 function fail(message) {
   show('menu');
+  openSetup();
   $('menu-error').textContent = message;
 }
+
+const roomMode = () => document.querySelector('input[name="room-mode"]:checked').value;
 
 const total = () => state.guesses.reduce((s, g) => s + g.points, 0);
 
@@ -640,7 +654,7 @@ async function createRoom() {
   roomConnect(randomId(10), buildRoomCreate({
     playerId: room.playerId || randomId(16),
     name: $('player-name').value,
-    mode: $('room-mode').value,
+    mode: roomMode(),
     timerSec: $('room-timer').value,
     rounds,
     forgiveKm: forgiveFor,
@@ -885,6 +899,7 @@ function leaveRoomLink() {
   $('new-instead').hidden = true;
   $('play-friends').hidden = false;
   $('start').textContent = 'Играть';
+  openSetup();
 }
 
 // ---------- Запуск ----------
@@ -1031,9 +1046,25 @@ async function init() {
     createRoom();
   };
   $('new-instead').onclick = leaveRoomLink;
-  const syncRoomMode = () => { $('room-timer-label').hidden = $('room-mode').value !== 'timer'; };
-  $('room-mode').onchange = syncRoomMode;
-  syncRoomMode();
+  // Выбор секунд — это выбор режима «На время».
+  $('room-timer').onfocus = $('room-timer').onchange = () => {
+    document.querySelector('input[name="room-mode"][value="timer"]').checked = true;
+  };
+  for (const a of document.querySelectorAll('[data-open-setup]')) {
+    a.onclick = (e) => {
+      e.preventDefault();
+      openSetup();
+    };
+  }
+  // Закрыть окно можно стрелкой, кликом мимо карточки и Esc; по ссылке друга оно и есть главная.
+  const closable = () => !$('landing').hidden;
+  document.querySelector('.setup-back').onclick = closeSetup;
+  document.querySelector('.setup').onclick = (e) => {
+    if (e.target === e.currentTarget && closable()) closeSetup();
+  };
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && closable()) closeSetup();
+  });
   $('lobby-copy').onclick = () => copy($('lobby-link').value, 'Ссылка скопирована — отправьте её друзьям.', 'lobby-copied');
   $('lobby-start').onclick = () => {
     $('lobby-error').textContent = '';
