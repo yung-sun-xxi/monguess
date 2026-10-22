@@ -4,7 +4,7 @@ const CFG = window.MG_CONFIG || {};
 // Чистые функции (очки, расстояния, ссылка для друзей) живут в lib.js: их проверяют тесты.
 const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, forgivenessKm, scoreGuess, sizeBonus, sizeBonusText,
-  describeScoring, formatKm,
+  describeScoring, formatKm, difficultyLevel, countryPool, countryAllowed, describeDifficulty,
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
   guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
@@ -209,13 +209,13 @@ async function countryAt(lat, lon) {
   }
 }
 
-// Каждый раунд — новая страна, страны выбираются равновероятно.
-async function generateRounds(count, sources, spheres, onProgress) {
+// Каждый раунд — новая страна, страны выбираются равновероятно из набора выбранной сложности.
+async function generateRounds(count, sources, spheres, difficulty, onProgress) {
   const rounds = [];
   const usedCountries = new Set();
   // Панорама у границы находится из двух стран; когда Nominatim промолчал, по стране её не отсеять.
   const usedIds = new Set();
-  for (const cc of shuffle(Object.keys(places))) {
+  for (const cc of shuffle(countryPool(Object.keys(places), difficulty))) {
     if (rounds.length === count) break;
     if (usedCountries.has(cc)) continue;
     onProgress(rounds.length + 1, count);
@@ -226,6 +226,8 @@ async function generateRounds(count, sources, spheres, onProgress) {
     }
     if (!found || usedIds.has(found.id)) continue;
     found.cc = resolveCountry(cc, await countryAt(found.lat, found.lon));
+    // Панорама у границы может оказаться в соседней стране не своей сложности: такой раунд пропускаем.
+    if (!countryAllowed(found.cc, difficulty)) continue;
     if (usedCountries.has(found.cc)) continue;
     usedCountries.add(found.cc);
     usedIds.add(found.id);
@@ -747,6 +749,7 @@ async function createRoom() {
     mode: roomMode(),
     timerSec: $('room-timer').value,
     scoring: $('scoring').value,
+    difficulty: search.difficulty,
     rounds,
     forgiveKm: forgiveFor,
   }));
@@ -765,7 +768,7 @@ function showLobby() {
   $('lobby-link').value = roomLink(pageBase(), room.id);
   const n = room.roundsTotal;
   $('lobby-info').textContent = `${n} ${pluralRu(n, 'раунд', 'раунда', 'раундов')} · ${describeRoomMode(room.settings)}`
-    + ` · ${describeScoring(room.settings.scoring)}`;
+    + ` · ${describeScoring(room.settings.scoring)} · ${describeDifficulty(room.settings.difficulty)}`;
   renderPlayers();
 }
 
@@ -800,7 +803,7 @@ async function showRoomRound({ index, place, endsAt, guessed }) {
   // после перезагрузки, сыграет только оставшиеся раунды: их и ждёт запись, чтобы считаться законченной.
   if (state.room !== room.id) {
     const search = room.search;
-    beginLog(search && { sources: search.sources, spheres: search.spheres, rounds: search.count },
+    beginLog(search && { sources: search.sources, spheres: search.spheres, rounds: search.count, difficulty: search.difficulty },
       room.settings.scoring, room.id, room.roundsTotal - index);
     postLog();
   }
@@ -1098,18 +1101,22 @@ function menuSearch() {
     fail('Нет ни одного ключа. Впишите mapillaryToken или googleApiKey в config.js — см. README.');
     return null;
   }
-  return { sources, spheres: $('spheres').value, count: Number($('rounds').value) };
+  // Сложность по умолчанию — средняя, как выбрано в меню.
+  return {
+    sources, spheres: $('spheres').value, count: Number($('rounds').value),
+    difficulty: difficultyLevel($('difficulty').value, 2),
+  };
 }
 
 // Места для игры под экраном загрузки. Сбой — исключение с текстом для игрока.
 // buildMs — только сам поиск, без загрузки Google.
-async function findPlaces({ sources, spheres, count }) {
+async function findPlaces({ sources, spheres, count, difficulty }) {
   show('loading');
   $('loading-text').textContent = 'Загрузка…';
   if (sources.includes('g') && !(await loadGoogle())) throw new Error('Не удалось загрузить Google Maps.');
   await loadBadImages();
   const built = Date.now();
-  const rounds = await generateRounds(count, sources, spheres, (n, of) => {
+  const rounds = await generateRounds(count, sources, spheres, difficulty, (n, of) => {
     $('loading-text').textContent = `Ищу место ${n} из ${of}…`;
   });
   return { rounds, buildMs: Date.now() - built };
@@ -1118,7 +1125,8 @@ async function findPlaces({ sources, spheres, count }) {
 async function newGame() {
   const search = menuSearch();
   if (!search) return;
-  beginLog({ sources: search.sources, spheres: search.spheres, rounds: search.count }, $('scoring').value);
+  beginLog({ sources: search.sources, spheres: search.spheres, rounds: search.count, difficulty: search.difficulty },
+    $('scoring').value);
   try {
     const { rounds, buildMs } = await findPlaces(search);
     state.buildMs = buildMs;

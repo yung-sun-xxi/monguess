@@ -36,6 +36,10 @@
 //                 plus scoring: 'size' | 'classic', the scoring mode, kept and shown in the
 //                 lobby. Missing (a page from before scoring modes) means 'size'; any other
 //                 value refuses the room.
+//                 plus difficulty: 1 | 2 | 3 (easy, medium, hard), the pool of countries the
+//                 creator's browser drew the rounds from, kept and shown in the lobby. Missing
+//                 (a page from before difficulty, which drew from every country) means 3; any
+//                 other value, a number as text included, refuses the room.
 //       rounds: 1-20 of { src: 'g'|'m', id, lat, lon, cc, forgiveKm }, found by the
 //               creator's browser as for a solo game; forgiveKm, 0-300, is what the room
 //               scores with, MG.scoreFor(km, forgiveKm): lib.js forgivenessKm(places[cc]) in a
@@ -106,8 +110,10 @@ function parseSettings(s) {
   if (!s || typeof s !== 'object') return null;
   const timing = parseTiming(s);
   const scoring = s.scoring === undefined ? 'size' : s.scoring;
+  const difficulty = s.difficulty === undefined ? 3 : s.difficulty;
   if (!timing || (scoring !== 'size' && scoring !== 'classic')) return null;
-  return { ...timing, scoring };
+  if (difficulty !== 1 && difficulty !== 2 && difficulty !== 3) return null;
+  return { ...timing, scoring, difficulty };
 }
 
 const error = (to, code, message) => ({ to, msg: { type: 'error', code, message } });
