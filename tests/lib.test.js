@@ -128,6 +128,101 @@ test('index.html: the numbers in "Что значат настройки" are wh
   assert.deepEqual(size.map((m) => num(m[1])), [100, 500]);
 });
 
+// ---------- Difficulty: country pools by how well-known a country is ----------
+
+const PLACE_CODES = Object.keys(require('../data/places.json'));
+
+test('country tiers: every code of places.json has exactly one tier 1-3, and nothing else has one', () => {
+  const listed = [1, 2, 3].flatMap((t) => MG.COUNTRY_TIERS[t]);
+  assert.deepEqual(Object.keys(MG.COUNTRY_TIERS).sort(), ['1', '2', '3']);
+  const seen = new Map();
+  for (const cc of listed) seen.set(cc, (seen.get(cc) || 0) + 1);
+  assert.deepEqual([...seen].filter(([, n]) => n !== 1), [], 'a code in two tiers or twice in one');
+  assert.deepEqual(PLACE_CODES.filter((cc) => !seen.has(cc)), [], 'a code of places.json with no tier');
+  assert.deepEqual(listed.filter((cc) => !PLACE_CODES.includes(cc)), [], 'a tier code absent from places.json');
+  assert.deepEqual([1, 2, 3].map((t) => MG.COUNTRY_TIERS[t].length), [54, 70, 102]);
+  for (const cc of PLACE_CODES) assert.ok([1, 2, 3].includes(MG.countryTier(cc)), cc);
+  assert.equal(MG.countryTier('US'), 1);
+  assert.equal(MG.countryTier('MT'), 2);
+  assert.equal(MG.countryTier('TL'), 3);
+  assert.equal(MG.countryTier('SX'), null);
+  assert.equal(MG.countryTier(undefined), null);
+});
+
+test('difficultyLevel: 1-3 from a number or the select text; anything else is the fallback, 3 unless given', () => {
+  for (const [value, level] of [[1, 1], [2, 2], [3, 3], ['1', 1], ['2', 2], ['3', 3]]) {
+    assert.equal(MG.difficultyLevel(value), level, JSON.stringify(value));
+  }
+  for (const value of [undefined, null, '', 0, 4, 1.5, '2.0', 'easy', true, [2], {}]) {
+    assert.equal(MG.difficultyLevel(value), 3, JSON.stringify(value));
+    assert.equal(MG.difficultyLevel(value, 2), 2, JSON.stringify(value));
+  }
+  assert.equal(MG.difficultyLevel('1', 2), 1);
+});
+
+test('countryPool: easy is tier 1, medium tiers 1-2, hard every code exactly as given', () => {
+  const easy = MG.countryPool(PLACE_CODES, 1);
+  const medium = MG.countryPool(PLACE_CODES, 2);
+  assert.deepEqual([...easy].sort(), [...MG.COUNTRY_TIERS[1]].sort());
+  assert.deepEqual([...medium].sort(), [...MG.COUNTRY_TIERS[1], ...MG.COUNTRY_TIERS[2]].sort());
+  assert.equal(medium.length, 124);
+  // Hard is today's game: no filtering at all, a code with no tier included, order kept.
+  const withStranger = [...PLACE_CODES, 'ZZ'];
+  assert.deepEqual(MG.countryPool(withStranger, 3), withStranger);
+  assert.deepEqual(MG.countryPool(withStranger, undefined), withStranger);
+  assert.deepEqual(MG.countryPool(['US', 'MT', 'TL', 'ZZ'], 1), ['US']);
+  assert.deepEqual(MG.countryPool(['US', 'MT', 'TL', 'ZZ'], 2), ['US', 'MT']);
+  assert.deepEqual(MG.countryPool(['US', 'MT', 'TL', 'ZZ'], '2'), ['US', 'MT']);
+});
+
+test('countryAllowed: a resolved country must be in the pool, except on hard, where anything goes', () => {
+  // resolveCountry can return a code places.json does not have (SX, BQ): hard keeps it, as today.
+  for (const cc of ['US', 'MT', 'TL', 'SX', 'BQ', 'ZZ']) {
+    assert.equal(MG.countryAllowed(cc, 3), true, cc);
+    assert.equal(MG.countryAllowed(cc, undefined), true, cc);
+  }
+  assert.equal(MG.countryAllowed('US', 1), true);
+  assert.equal(MG.countryAllowed('MT', 1), false);
+  assert.equal(MG.countryAllowed('TL', 1), false);
+  assert.equal(MG.countryAllowed('SX', 1), false);
+  assert.equal(MG.countryAllowed('US', 2), true);
+  assert.equal(MG.countryAllowed('MT', 2), true);
+  assert.equal(MG.countryAllowed('TL', 2), false);
+  assert.equal(MG.countryAllowed('BQ', 2), false);
+  // A border panorama found from France on easy may resolve to Andorra: not in the pool.
+  assert.equal(MG.countryAllowed(MG.resolveCountry('FR', 'AD'), 1), false);
+});
+
+test('describeDifficulty: the difficulty in the words of the menu; a room from before difficulty is hard', () => {
+  assert.equal(MG.describeDifficulty(1), 'Сложность: лёгкая');
+  assert.equal(MG.describeDifficulty(2), 'Сложность: средняя');
+  assert.equal(MG.describeDifficulty(3), 'Сложность: сложная');
+  assert.equal(MG.describeDifficulty(undefined), 'Сложность: сложная');
+});
+
+test('index.html: the difficulty select offers easy, medium (the default) and hard', () => {
+  const select = INDEX_HTML.match(/<select id="difficulty">([\s\S]*?)<\/select>/);
+  assert.ok(select, 'no <select id="difficulty">');
+  const options = [...select[1].matchAll(/<option value="(\w+)"( selected)?>([^<]+)<\/option>/g)]
+    .map(([, value, selected, text]) => [value, Boolean(selected), text]);
+  assert.deepEqual(options, [
+    ['1', false, 'Лёгкая'],
+    ['2', true, 'Средняя'],
+    ['3', false, 'Сложная'],
+  ]);
+});
+
+test('index.html: the counts in "Что значат настройки" for each difficulty are the tier sizes', () => {
+  const text = INDEX_HTML.replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const easy = text.match(/<b>Лёгкая<\/b> — (\d+) /);
+  const medium = text.match(/<b>Средняя<\/b> — плюс ещё (\d+) [^,]*, всего (\d+)/);
+  assert.ok(easy && medium, 'the easy and medium lines');
+  assert.equal(Number(easy[1]), MG.COUNTRY_TIERS[1].length);
+  assert.equal(Number(medium[1]), MG.COUNTRY_TIERS[2].length);
+  assert.equal(Number(medium[2]), MG.COUNTRY_TIERS[1].length + MG.COUNTRY_TIERS[2].length);
+  assert.match(text, /<b>Сложная<\/b> — все 219 стран/);
+});
+
 test('forgivenessKm: 0 without places or with one, capped at 300 km, small for a small country', () => {
   const places = require('../data/places.json');
   assert.equal(MG.forgivenessKm(undefined), 0);
@@ -203,6 +298,17 @@ test('challenge link: a classic link carries its mode', () => {
   assert.match(link, /^[A-Za-z0-9_-]+$/);
   assert.notEqual(link, MG.encodeChallenge(LINK_ROUNDS, 'size'));
   assert.deepEqual(MG.decodeChallenge(link), { scoring: 'classic', rounds: LINK_DECODED });
+});
+
+test('challenge link: difficulty does not touch it, an easy game round-trips exactly as before', () => {
+  // The link carries the places themselves, so the pool they were drawn from does not matter.
+  const easy = LINK_ROUNDS.filter((r) => MG.countryAllowed(r.cc, 1));
+  assert.equal(easy.length, LINK_ROUNDS.length, 'ES and AU are both easy countries');
+  const tagged = easy.map((r) => ({ ...r, difficulty: 1 }));
+  for (const scoring of ['size', 'classic']) {
+    assert.equal(MG.encodeChallenge(tagged, scoring), MG.encodeChallenge(LINK_ROUNDS, scoring), scoring);
+    assert.deepEqual(MG.decodeChallenge(MG.encodeChallenge(tagged, scoring)), { scoring, rounds: LINK_DECODED });
+  }
 });
 
 test('decodeChallenge: null for anything that is not a well-formed link', () => {
@@ -318,7 +424,7 @@ const LOG_GUESSES = [
 ];
 const LOG_GAME = {
   id: 'abc123def456', startedAt: 1760000000000, buildMs: 12345, name: 'Саша',
-  settings: { sources: ['g', 'm'], spheres: 'walk', rounds: 3 }, challenge: false, scoring: 'size',
+  settings: { sources: ['g', 'm'], spheres: 'walk', rounds: 3, difficulty: 2 }, challenge: false, scoring: 'size',
   rounds: LOG_ROUNDS, guesses: LOG_GUESSES, errors: [],
 };
 
@@ -329,7 +435,7 @@ test('buildLogRecord: a finished game with a name, every field', () => {
     startedAt: 1760000000000,
     buildMs: 12345,
     name: 'Саша',
-    settings: { sources: ['g', 'm'], spheres: 'walk', rounds: 3 },
+    settings: { sources: ['g', 'm'], spheres: 'walk', rounds: 3, difficulty: 2 },
     challenge: false,
     scoring: 'size',
     rounds: [
@@ -438,6 +544,18 @@ test('buildLogRecord: every record says how it was scored, a friends link and a 
   // Anything else is the default, size-aware: the field is never missing.
   assert.equal(MG.buildLogRecord({ ...LOG_GAME, scoring: undefined }).scoring, 'size');
   assert.equal(MG.buildLogRecord({ ...LOG_GAME, scoring: 'flat' }).scoring, 'size');
+});
+
+test('buildLogRecord: the settings carry the difficulty; settings without one are hard, as before', () => {
+  for (const difficulty of [1, 2, 3]) {
+    const rec = MG.buildLogRecord({ ...LOG_GAME, settings: { ...LOG_GAME.settings, difficulty } });
+    assert.deepEqual(rec.settings, { sources: ['g', 'm'], spheres: 'walk', rounds: 3, difficulty });
+  }
+  const { difficulty, ...older } = LOG_GAME.settings;
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, settings: older }).settings.difficulty, 3);
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, settings: { ...older, difficulty: 'easy' } }).settings.difficulty, 3);
+  // A friends link still has no settings at all.
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, challenge: true }).settings, null);
 });
 
 const NAME_REQUIRED = 'Введите имя, чтобы начать игру.';

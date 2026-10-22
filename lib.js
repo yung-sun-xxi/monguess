@@ -115,6 +115,58 @@
     return TERRITORY_OWNER[target] === found ? target : found;
   }
 
+  // ---------- Difficulty: which countries a game draws from ----------
+  // A country's tier is how well-known it is to an ordinary player, not its size or how hard
+  // its imagery is: 1 easy (the countries a GeoGuessr regular sees all the time), 2 medium,
+  // 3 hard (microstates, small islands, overseas territories, rarely-heard-of countries).
+  // Every code of data/places.json has exactly one tier (tests/lib.test.js checks it).
+  // Pools are cumulative: easy is tier 1, medium tiers 1-2, hard everything.
+  const tierList = (codes) => codes.trim().split(/\s+/);
+  const COUNTRY_TIERS = {
+    1: tierList(`
+      US CA MX BR AR CL CO PE GB IE FR ES PT IT DE NL BE CH AT PL CZ HU RO HR GR SE NO
+      FI DK IS RU UA TR IL AE SA EG MA ZA KE NG JP KR CN TW IN TH VN ID PH MY SG AU NZ`),
+    2: tierList(`
+      CU DO JM PR CR PA GT VE EC BO PY UY SK SI RS BA ME MK AL BG EE LV LT BY MD LU MT
+      CY GE AM AZ KZ UZ MN PK BD LK NP KH LA MM HK KP IR IQ JO LB SY KW QA OM YE AF TN
+      DZ LY SD ET TZ UG RW GH SN CI CM MZ ZW MG NA BW`),
+    3: tierList(`
+      AD AG AO AQ AS AW AX BB BF BH BI BJ BM BN BS BT BZ CD CF CG CK CV CW DJ DM EH ER
+      FJ FK FM FO GA GD GF GI GL GM GN GP GQ GS GU GW GY HN HT IM KG KI KM KN KY LC LI
+      LR LS MC MH ML MO MP MQ MR MU MV MW NC NE NI PF PG PS PW RE SB SC SJ SL SM SO SR
+      SS ST SV SZ TC TD TG TJ TL TM TO TT TV VA VC VI VU WS XK YT ZM`),
+  };
+  const TIER_OF = new Map(Object.entries(COUNTRY_TIERS).flatMap(([t, codes]) => codes.map((cc) => [cc, Number(t)])));
+
+  // A country code's tier, 1-3; null for a code with none (one resolveCountry made up: SX, BQ).
+  const countryTier = (cc) => TIER_OF.get(cc) ?? null;
+
+  const HARD = 3;
+  const DIFFICULTY_TEXT = { 1: 'лёгкая', 2: 'средняя', 3: 'сложная' };
+
+  // A difficulty, 1-3, from a number or the select's text. Anything else is fallback: hard by
+  // default, because a game, room or log record from before difficulty drew from every country.
+  function difficultyLevel(value, fallback = HARD) {
+    if (value === 1 || value === 2 || value === 3) return value;
+    if (value === '1' || value === '2' || value === '3') return Number(value);
+    return fallback;
+  }
+
+  // Whether a round whose imagery resolved to cc may stay in a game of this difficulty. Hard
+  // filters nothing at all, a code with no tier included: exactly the game before difficulty.
+  function countryAllowed(cc, difficulty) {
+    const level = difficultyLevel(difficulty);
+    if (level === HARD) return true;
+    const tier = countryTier(cc);
+    return tier !== null && tier <= level;
+  }
+
+  // The codes a game of this difficulty draws its countries from, in the order given.
+  const countryPool = (codes, difficulty) => codes.filter((cc) => countryAllowed(cc, difficulty));
+
+  // A difficulty in the words of the menu, for the lobby.
+  const describeDifficulty = (difficulty) => `Сложность: ${DIFFICULTY_TEXT[difficultyLevel(difficulty)]}`;
+
   // The friends link: the rounds as URL-safe base64 of [src, id, lat, lon, cc] tuples. A classic
   // game puts the string 'c' before them; a size-aware one stays the plain list, exactly the
   // link of the time before scoring modes, so either kind of page opens it.
@@ -179,7 +231,7 @@
   // (kind: Google's own, a person's photosphere, Mapillary); a friends link does not carry it,
   // so its rounds have kind null, and its settings were the friend's, so settings are null.
   // scoring is the game's scoring mode, 'size' or 'classic', in every record: a friends link and
-  // a room carry theirs.
+  // a room carry theirs. settings.difficulty is 1-3; settings without one are hard (3).
   // A room game carries its room id in room (null otherwise). A room reveals its places one
   // round at a time, so its rounds are only the ones played so far; roundsTotal, the room's
   // count, decides whether it was played to the end. Without it the rounds are the whole game.
@@ -195,7 +247,10 @@
       name: cleanName(name),
       settings: challenge || !settings
         ? null
-        : { sources: settings.sources, spheres: settings.spheres, rounds: settings.rounds },
+        : {
+          sources: settings.sources, spheres: settings.spheres, rounds: settings.rounds,
+          difficulty: difficultyLevel(settings.difficulty),
+        },
       challenge: Boolean(challenge),
       scoring: scoringMode(scoring),
       rounds: rounds.map((r) => ({
@@ -251,17 +306,17 @@
 
   // The first message of the browser that makes a room. mode and timerSec come from the menu
   // selects ('none' | 'timer', seconds as text), scoring from the scoring select ('size' |
-  // 'classic'); forgiveKm(cc) is the round's country spread, which the room scores with. A
-  // classic room sends 0 for every round: the room itself scores both modes the same way.
-  // Rounds keep only the fields the protocol names.
-  function buildRoomCreate({ playerId, name, mode, timerSec, scoring, rounds, forgiveKm }) {
+  // 'classic'), difficulty 1-3 as the menu search has it (missing: hard); forgiveKm(cc) is the
+  // round's country spread, which the room scores with. A classic room sends 0 for every round:
+  // the room itself scores both modes the same way. Rounds keep only the fields the protocol names.
+  function buildRoomCreate({ playerId, name, mode, timerSec, scoring, difficulty, rounds, forgiveKm }) {
     const classic = scoringMode(scoring) === 'classic';
     const timing = mode === 'timer' ? { mode: 'timer', timerSec: Number(timerSec) } : { mode: 'none' };
     return {
       type: 'create',
       playerId,
       name: cleanName(name),
-      settings: { ...timing, scoring: scoringMode(scoring) },
+      settings: { ...timing, scoring: scoringMode(scoring), difficulty: difficultyLevel(difficulty) },
       rounds: rounds.map((r) => ({
         src: r.src, id: r.id, lat: r.lat, lon: r.lon, cc: r.cc, forgiveKm: classic ? 0 : forgiveKm(r.cc),
       })),
@@ -584,6 +639,7 @@
   const api = {
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
     scoringMode, sizeBonus, scoreGuess, sizeBonusText, describeScoring,
+    COUNTRY_TIERS, countryTier, difficultyLevel, countryAllowed, countryPool, describeDifficulty,
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
     guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,

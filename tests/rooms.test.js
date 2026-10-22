@@ -121,6 +121,13 @@ test('create rejects bad rounds, settings and names', () => {
     { settings: { mode: 'none', scoring: 'flat' }, rounds: PLACES },
     { settings: { mode: 'none', scoring: null }, rounds: PLACES },
     { settings: { mode: 'timer', timerSec: 30, scoring: 1 }, rounds: PLACES },
+    { settings: { mode: 'none', difficulty: 0 }, rounds: PLACES },
+    { settings: { mode: 'none', difficulty: 4 }, rounds: PLACES },
+    { settings: { mode: 'none', difficulty: 1.5 }, rounds: PLACES },
+    { settings: { mode: 'none', difficulty: '2' }, rounds: PLACES },
+    { settings: { mode: 'none', difficulty: null }, rounds: PLACES },
+    { settings: { mode: 'none', difficulty: true }, rounds: PLACES },
+    { settings: { mode: 'timer', timerSec: 30, scoring: 'classic', difficulty: 'easy' }, rounds: PLACES },
   ];
   for (const b of bad) {
     const sim = new Sim();
@@ -132,11 +139,11 @@ test('create rejects bad rounds, settings and names', () => {
 
 test('create: the scoring mode is kept; a create without one (an older page) is size-aware', () => {
   const cases = [
-    [{ mode: 'none' }, { mode: 'none', timerSec: null, scoring: 'size' }],
-    [{ mode: 'none', scoring: 'size' }, { mode: 'none', timerSec: null, scoring: 'size' }],
-    [{ mode: 'none', scoring: 'classic' }, { mode: 'none', timerSec: null, scoring: 'classic' }],
-    [{ mode: 'timer', timerSec: 30, scoring: 'classic' }, { mode: 'timer', timerSec: 30, scoring: 'classic' }],
-    [{ mode: 'timer', timerSec: 30 }, { mode: 'timer', timerSec: 30, scoring: 'size' }],
+    [{ mode: 'none' }, { mode: 'none', timerSec: null, scoring: 'size', difficulty: 3 }],
+    [{ mode: 'none', scoring: 'size' }, { mode: 'none', timerSec: null, scoring: 'size', difficulty: 3 }],
+    [{ mode: 'none', scoring: 'classic' }, { mode: 'none', timerSec: null, scoring: 'classic', difficulty: 3 }],
+    [{ mode: 'timer', timerSec: 30, scoring: 'classic' }, { mode: 'timer', timerSec: 30, scoring: 'classic', difficulty: 3 }],
+    [{ mode: 'timer', timerSec: 30 }, { mode: 'timer', timerSec: 30, scoring: 'size', difficulty: 3 }],
   ];
   for (const [settings, kept] of cases) {
     const sim = new Sim();
@@ -144,6 +151,23 @@ test('create: the scoring mode is kept; a create without one (an older page) is 
     assert.deepEqual(sim.state.settings, kept, JSON.stringify(settings));
     assert.deepEqual(out.find((o) => o.msg.type === 'state').msg.settings, kept, JSON.stringify(settings));
     // Anyone who joins later sees the same mode.
+    const joined = sim.send({ type: 'join', playerId: 'b', name: 'Bob' });
+    assert.deepEqual(joined.find((o) => o.msg.type === 'state').msg.settings, kept);
+  }
+});
+
+test('create: the difficulty is kept; a create without one (a page from before difficulty) is hard', () => {
+  const cases = [
+    [{ mode: 'none', difficulty: 1 }, { mode: 'none', timerSec: null, scoring: 'size', difficulty: 1 }],
+    [{ mode: 'none', scoring: 'classic', difficulty: 2 }, { mode: 'none', timerSec: null, scoring: 'classic', difficulty: 2 }],
+    [{ mode: 'timer', timerSec: 30, difficulty: 3 }, { mode: 'timer', timerSec: 30, scoring: 'size', difficulty: 3 }],
+    [{ mode: 'timer', timerSec: 30, scoring: 'size' }, { mode: 'timer', timerSec: 30, scoring: 'size', difficulty: 3 }],
+  ];
+  for (const [settings, kept] of cases) {
+    const sim = new Sim();
+    const out = sim.send({ type: 'create', playerId: 'a', name: 'Ann', settings, rounds: PLACES });
+    assert.deepEqual(sim.state.settings, kept, JSON.stringify(settings));
+    assert.deepEqual(out.find((o) => o.msg.type === 'state').msg.settings, kept, JSON.stringify(settings));
     const joined = sim.send({ type: 'join', playerId: 'b', name: 'Bob' });
     assert.deepEqual(joined.find((o) => o.msg.type === 'state').msg.settings, kept);
   }

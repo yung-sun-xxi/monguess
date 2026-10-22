@@ -43,13 +43,14 @@ const ROUNDS = [
 test('buildRoomCreate: no-timer mode, rounds carry forgiveKm and only the protocol fields', () => {
   const forgive = { ES: 120.5, AU: 300 };
   const msg = MG.buildRoomCreate({
-    playerId: 'p1', name: '  Ann  ', mode: 'none', timerSec: '30', scoring: 'size', rounds: ROUNDS, forgiveKm: (cc) => forgive[cc],
+    playerId: 'p1', name: '  Ann  ', mode: 'none', timerSec: '30', scoring: 'size', difficulty: 2, rounds: ROUNDS,
+    forgiveKm: (cc) => forgive[cc],
   });
   assert.deepEqual(msg, {
     type: 'create',
     playerId: 'p1',
     name: 'Ann',
-    settings: { mode: 'none', scoring: 'size' },
+    settings: { mode: 'none', scoring: 'size', difficulty: 2 },
     rounds: [
       { src: 'g', id: 'pano-es', lat: 41.3874, lon: 2.1686, cc: 'ES', forgiveKm: 120.5 },
       { src: 'm', id: '4471234', lat: -33.8688, lon: 151.2093, cc: 'AU', forgiveKm: 300 },
@@ -59,7 +60,23 @@ test('buildRoomCreate: no-timer mode, rounds carry forgiveKm and only the protoc
 
 test('buildRoomCreate: timer mode carries its seconds as a number', () => {
   const msg = MG.buildRoomCreate({ playerId: 'p1', name: 'Ann', mode: 'timer', timerSec: '60', scoring: 'size', rounds: ROUNDS, forgiveKm: () => 0 });
-  assert.deepEqual(msg.settings, { mode: 'timer', timerSec: 60, scoring: 'size' });
+  // No difficulty given (as an older caller) is hard, the whole world.
+  assert.deepEqual(msg.settings, { mode: 'timer', timerSec: 60, scoring: 'size', difficulty: 3 });
+});
+
+test('buildRoomCreate: the difficulty goes as a number 1-3, and the room keeps it, end to end', () => {
+  for (const [difficulty, sent] of [[1, 1], [2, 2], [3, 3], ['1', 1], [undefined, 3], ['x', 3]]) {
+    const msg = MG.buildRoomCreate({
+      playerId: 'p1', name: 'Ann', mode: 'none', timerSec: '30', scoring: 'size', difficulty, rounds: ROUNDS,
+      forgiveKm: (cc) => MG.forgivenessKm(places[cc]),
+    });
+    assert.equal(msg.settings.difficulty, sent, JSON.stringify(difficulty));
+    const { state, out } = R.step(null, msg, 1_800_000_000_000);
+    assert.ok(state, JSON.stringify(out));
+    assert.equal(state.settings.difficulty, sent);
+    assert.equal(MG.describeDifficulty(out.find((o) => o.msg.type === 'state').msg.settings.difficulty),
+      ['Сложность: лёгкая', 'Сложность: средняя', 'Сложность: сложная'][sent - 1]);
+  }
 });
 
 test('buildRoomCreate: a classic room sends forgiveKm 0 for every round and says so in settings', () => {
@@ -116,6 +133,12 @@ test('describeScoring: the lobby says how the room scores; a room from before #3
   assert.equal(MG.describeScoring({ mode: 'none', timerSec: null, scoring: 'classic' }.scoring),
     'Подсчёт очков: классический, как в GeoGuessr');
   assert.equal(MG.describeScoring({ mode: 'none', timerSec: null }.scoring), 'Подсчёт очков: с учётом размера страны');
+});
+
+test('describeDifficulty: the lobby says the room difficulty; a room from before difficulty is hard', () => {
+  assert.equal(MG.describeDifficulty({ mode: 'none', timerSec: null, scoring: 'size', difficulty: 1 }.difficulty),
+    'Сложность: лёгкая');
+  assert.equal(MG.describeDifficulty({ mode: 'none', timerSec: null, scoring: 'size' }.difficulty), 'Сложность: сложная');
 });
 
 test('pluralRu: Russian plural forms by the last digits', () => {
