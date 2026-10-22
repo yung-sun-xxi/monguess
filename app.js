@@ -3,7 +3,7 @@
 const CFG = window.MG_CONFIG || {};
 // Чистые функции (очки, расстояния, ссылка для друзей) живут в lib.js: их проверяют тесты.
 const {
-  MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, formatKm,
+  MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, forgivenessKm, formatKm,
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
@@ -22,6 +22,16 @@ const state = {
 };
 
 // ---------- Страны и случайные точки ----------
+
+// Радиус прощения страны считается один раз на код: places не меняется за игру.
+// Страны нет в places.json — радиус 0. Пока файл не загрузился (игра по ссылке его не ждёт),
+// ноль не кэшируется.
+const forgiveCache = new Map();
+function forgiveFor(cc) {
+  if (!places) return 0;
+  if (!forgiveCache.has(cc)) forgiveCache.set(cc, forgivenessKm(places[cc]));
+  return forgiveCache.get(cc);
+}
 
 function countryName(cc) {
   try { return regionNames.of(cc) || cc; } catch { return cc; }
@@ -327,6 +337,9 @@ function showResult(round, guess) {
 
   $('result-country').textContent = `${flag(round.cc)} ${countryName(round.cc)}`;
   $('result-distance').textContent = `Вы ошиблись на ${formatKm(guess.km)}`;
+  const forgiven = guess.forgiven >= 1;
+  $('result-forgiven').textContent = forgiven ? `Прощено ${formatKm(guess.forgiven)}: разброс внутри страны` : '';
+  $('result-forgiven').hidden = !forgiven;
   $('result-points').textContent = `+${guess.points.toLocaleString('ru')} очков`;
   $('next').textContent = state.index + 1 < state.rounds.length ? 'Следующий раунд' : 'Итоги';
 }
@@ -519,7 +532,9 @@ async function init() {
     const ll = guessMarker.getLatLng();
     const guess = { lat: ll.lat, lon: ll.lng };
     guess.km = distanceKm(round, guess);
-    guess.points = scoreFor(guess.km);
+    const forgive = forgiveFor(round.cc);
+    guess.points = scoreFor(guess.km, forgive);
+    guess.forgiven = Math.min(forgive, guess.km);
     state.guesses.push(guess);
     showResult(round, guess);
   };
