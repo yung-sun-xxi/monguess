@@ -123,14 +123,13 @@
     <p id="lobby-error" class="error"></p>
   </section>
 
-  <!-- Временная заглушка вместо раунда в комнате: настоящий экран раунда — issue #25. -->
-  <section id="room-round" class="screen" hidden>
-    <h1 id="room-round-text"></h1>
-  </section>
-
   <section id="game" hidden>
     <div id="pano"></div>
-    <div id="hud"><span id="hud-round"></span><span id="hud-score"></span></div>
+    <div id="hud">
+      <span id="hud-round"></span><span id="hud-score"></span>
+      <!-- Только в комнате: кто уже ответил и таймер после первого ответа. -->
+      <span id="hud-room" hidden></span><span id="hud-timer" hidden></span>
+    </div>
     <div id="guess-box">
       <div id="guess-map"></div>
       <button id="guess" class="primary" disabled>Угадать</button>
@@ -144,6 +143,9 @@
       <div id="result-distance"></div>
       <div id="result-forgiven" hidden></div>
       <div id="result-points"></div>
+      <!-- Только в комнате: ответы всех игроков и отсчёт до следующего раунда. -->
+      <table id="room-results" hidden></table>
+      <p id="room-next" hidden></p>
       <button id="next" class="primary"></button>
     </div>
   </section>

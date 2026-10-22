@@ -6,6 +6,7 @@ const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, forgivenessKm, formatKm,
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
+  guessedStatus, secondsLeft, roomResultRows, roomFinalRows,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
@@ -16,10 +17,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const regionNames = new Intl.DisplayNames(['ru'], { type: 'region' });
 
 let places = null; // { "KE": [[lat, lon, population], ...], ... }
-// Поля лога (logId … finished) описывают текущую игру для /api/log, см. «Лог игры».
+// Поля лога (logId … roundsTotal) описывают текущую игру для /api/log, см. «Лог игры».
+// В комнате rounds и guesses — только сыгранные раунды и свои ответы, room — id комнаты.
 const state = {
   rounds: [], guesses: [], index: 0,
   logId: '', startedAt: 0, buildMs: 0, settings: null, challenge: false, errors: [], finished: false,
+  room: null, roundsTotal: 0,
 };
 
 // ---------- Страны и случайные точки ----------
@@ -198,12 +201,14 @@ function newLogId() {
   return Array.from(bytes, (b) => (b % 36).toString(36)).join('');
 }
 
-// Новая игра: пустые раунды и свежая запись лога. settings — null для игры по ссылке.
-function beginLog(settings) {
+// Новая игра: пустые раунды и свежая запись лога. settings — null для игры по ссылке
+// и для того, кто вошёл в чужую комнату. roomId и roundsTotal — только для игры в комнате.
+function beginLog(settings, roomId = null, roundsTotal = 0) {
   Object.assign(state, {
     rounds: [], guesses: [], index: 0,
     logId: newLogId(), startedAt: Date.now(), buildMs: 0,
-    settings, challenge: !settings, errors: [], finished: false,
+    settings, challenge: !settings && !roomId, errors: [], finished: false,
+    room: roomId, roundsTotal,
   });
 }
 
@@ -223,6 +228,8 @@ function postLog(beacon = false) {
       rounds: state.rounds,
       guesses: state.guesses,
       errors: state.errors,
+      room: state.room,
+      roundsTotal: state.roundsTotal,
     }));
     if (beacon) {
       navigator.sendBeacon('/api/log', body);
@@ -236,7 +243,7 @@ function postLog(beacon = false) {
 // ---------- Экраны ----------
 
 function show(id) {
-  for (const s of ['menu', 'loading', 'lobby', 'room-round', 'game', 'result', 'final']) $(s).hidden = s !== id;
+  for (const s of ['menu', 'loading', 'lobby', 'game', 'result', 'final']) $(s).hidden = s !== id;
 }
 
 function fail(message) {
@@ -291,6 +298,7 @@ function resetGuessMap() {
       attribution: '© OpenStreetMap',
     }).addTo(guessMap);
     guessMap.on('click', (e) => {
+      if (room.phase === 'round' && room.guessed) return; // в комнате ответ уже отправлен
       const ll = e.latlng.wrap();
       if (guessMarker) guessMarker.setLatLng(ll);
       else guessMarker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 2, fillColor: '#e74c3c', fillOpacity: 1 }).addTo(guessMap);
@@ -324,11 +332,15 @@ async function startRound() {
 }
 
 let resultMap = null;
-function showResult(round, guess) {
-  show('result');
+function freshResultMap() {
   if (resultMap) resultMap.remove();
   resultMap = L.map('result-map', { worldCopyJump: true });
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(resultMap);
+}
+
+function showResult(round, guess) {
+  show('result');
+  freshResultMap();
   const actual = [round.lat, round.lon];
   const guessed = [guess.lat, guess.lon];
   L.polyline([guessed, actual], { color: '#fff', dashArray: '6 8', weight: 2 }).addTo(resultMap);
@@ -415,7 +427,15 @@ function nameMissing() {
 // Один сокет на комнату: подключиться, отправить JSON, разобрать ответ по type в roomHandlers.
 // Протокол сообщений описан в начале rooms/rules.js. playerId пока живёт только в памяти:
 // перезагрузка страницы входит в комнату новым игроком.
-const room = { id: '', playerId: '', ws: null, phase: '', settings: null, roundsTotal: 0, players: [] };
+// Игра в комнате: index и place — текущий раунд, guessed — свой ответ уже отправлен, endsAt —
+// конец таймера, nextAt — старт следующего раунда, table — таблица очков из последнего
+// сообщения комнаты, notice — сбой, который показать вместо «Ответили N из M».
+// kinds и search знает только создатель комнаты: как нашлись снимки и настройки поиска, для лога.
+const room = {
+  id: '', playerId: '', ws: null, phase: '', settings: null, roundsTotal: 0, players: [],
+  index: -1, place: null, guessed: false, endsAt: null, nextAt: null, table: [], notice: '',
+  loggedIndex: -1, tick: null, kinds: new Map(), search: null,
+};
 
 const randomId = (length) => idFromBytes(crypto.getRandomValues(new Uint8Array(length)));
 const pageBase = () => `${location.origin}${location.pathname}`;
@@ -427,8 +447,11 @@ const ROOM_ERRORS = {
 };
 const roomErrorText = (msg) => ROOM_ERRORS[msg.code] || `Комната не приняла запрос: ${msg.message}`;
 
+// true, если сообщение ушло.
 function roomSend(msg) {
-  if (room.ws?.readyState === WebSocket.OPEN) room.ws.send(JSON.stringify(msg));
+  if (room.ws?.readyState !== WebSocket.OPEN) return false;
+  room.ws.send(JSON.stringify(msg));
+  return true;
 }
 
 // Открыть сокет комнаты id и первым сообщением отправить first (create или join).
@@ -449,27 +472,65 @@ function roomConnect(id, first) {
     if (room.ws !== ws) return; // закрыли сами
     room.ws = null;
     if (!room.phase) fail('Не удалось подключиться к комнате. Проверьте интернет и попробуйте ещё раз.');
-    else $('lobby-error').textContent = 'Связь с комнатой потеряна. Обновите страницу, чтобы войти снова.';
+    else roomLost('Связь с комнатой потеряна. Обновите страницу, чтобы войти снова.');
   };
 }
 
+// Сообщение state приходит при входе: по фазе сразу рисуем нужный экран, в том числе тому,
+// кто вошёл посреди игры.
 const roomHandlers = {
   state(msg) {
     const entering = !room.phase;
-    Object.assign(room, { phase: msg.phase, settings: msg.settings, roundsTotal: msg.roundsTotal, players: msg.players });
+    Object.assign(room, {
+      phase: msg.phase, settings: msg.settings, roundsTotal: msg.roundsTotal, players: msg.players, table: msg.table,
+    });
     if (entering) history.replaceState(null, '', roomLink(pageBase(), room.id));
     if (msg.phase === 'lobby') showLobby();
-    else showRoomRound(msg.index, msg.roundsTotal);
+    else if (msg.phase === 'round') {
+      const me = msg.players.find((p) => p.playerId === room.playerId);
+      showRoomRound({ index: msg.index, place: msg.place, endsAt: msg.endsAt, guessed: Boolean(me?.guessed) });
+    } else if (msg.phase === 'results') showRoomResults({ ...msg.results, nextAt: msg.nextAt });
+    else showRoomFinal();
   },
   players(msg) {
     room.players = msg.players;
     renderPlayers();
+    renderRoomStatus();
   },
   round(msg) {
     room.phase = 'round';
-    showRoomRound(msg.index, msg.of);
+    for (const p of room.players) p.guessed = false; // ответы прошлого раунда не в счёт
+    showRoomRound({ index: msg.index, place: msg.place, endsAt: null, guessed: false });
+  },
+  guessed(msg) {
+    const p = room.players.find((x) => x.playerId === msg.playerId);
+    if (p) p.guessed = true;
+    renderRoomStatus();
+  },
+  countdown(msg) {
+    room.endsAt = msg.endsAt;
+    roomTick();
+  },
+  results(msg) {
+    room.phase = 'results';
+    showRoomResults(msg);
+  },
+  final(msg) {
+    room.phase = 'final';
+    room.table = msg.table;
+    // Итоги последнего раунда остаются на экране, к таблице ведёт кнопка «Итоги».
+    $('next').hidden = false;
+    if (state.room === room.id && !state.finished) {
+      state.finished = true;
+      postLog();
+    }
   },
   error(msg) {
+    if (room.phase === 'round') {
+      room.notice = roomErrorText(msg);
+      renderRoomStatus();
+      return;
+    }
     if (room.phase) {
       $('lobby-error').textContent = roomErrorText(msg);
       return;
@@ -494,6 +555,8 @@ async function createRoom() {
     return;
   }
   $('loading-text').textContent = 'Создаю комнату…';
+  room.kinds = new Map(rounds.map((r) => [r.id, r.kind]));
+  room.search = search;
   roomConnect(randomId(10), buildRoomCreate({
     playerId: room.playerId || randomId(16),
     name: $('player-name').value,
@@ -540,10 +603,196 @@ function renderPlayers() {
   }
 }
 
-// Временно, до экрана раунда (#25): только номер раунда.
-function showRoomRound(index, of) {
-  show('room-round');
-  $('room-round-text').textContent = `Раунд ${index + 1} из ${of}`;
+const myRoomTotal = () => room.table.find((r) => r.playerId === room.playerId)?.total ?? 0;
+
+// Раунд в комнате — тот же экран #game, что в своей игре. После ответа карта заперта до
+// итогов раунда, в HUD — сколько игроков ответило и, в режиме таймера, сколько секунд осталось.
+async function showRoomRound({ index, place, endsAt, guessed }) {
+  Object.assign(room, { index, place, endsAt, guessed: false, nextAt: null, notice: '' });
+  // Лог игры в комнате начинается с первого увиденного раунда.
+  if (state.room !== room.id) {
+    const search = room.search;
+    beginLog(search && { sources: search.sources, spheres: search.spheres, rounds: search.count }, room.id, room.roundsTotal);
+    postLog();
+  }
+  state.index = index; // номер раунда для ошибок панорамы в логе
+  show('game');
+  $('hud-round').textContent = `Раунд ${index + 1} из ${room.roundsTotal}`;
+  $('hud-score').textContent = `Очки: ${myRoomTotal().toLocaleString('ru')}`;
+  $('hud-room').hidden = false;
+  resetGuessMap();
+  lockRoomGuess(guessed);
+  renderRoomStatus();
+  room.tick ??= setInterval(roomTick, 250);
+  roomTick();
+  try {
+    if (place.src === 'g' && !(await loadGoogle())) throw new Error('Не удалось загрузить Google Maps.');
+    if (place.src === 'm' && !CFG.mapillaryToken) throw new Error('В этой комнате есть снимки Mapillary, а ключа Mapillary здесь нет.');
+    if (room.index !== index || room.phase !== 'round') return; // раунд уже сменился
+    await showPanorama(place);
+  } catch (e) {
+    logError(index + 1, e.message);
+    room.notice = `Панорама не загрузилась: ${e.message}`;
+    renderRoomStatus();
+  }
+}
+
+function lockRoomGuess(locked) {
+  room.guessed = locked;
+  $('guess-box').classList.toggle('locked', locked);
+  $('guess').textContent = locked ? 'Ответ принят — ждём остальных' : 'Угадать';
+  $('guess').disabled = locked || !guessMarker;
+}
+
+function roomGuess() {
+  if (!guessMarker || room.guessed) return;
+  const ll = guessMarker.getLatLng();
+  if (roomSend({ type: 'guess', round: room.index, lat: ll.lat, lon: ll.lng })) lockRoomGuess(true);
+  else roomLost('Связь с комнатой потеряна. Обновите страницу, чтобы войти снова.');
+}
+
+function renderRoomStatus() {
+  if (room.phase !== 'round') return;
+  $('hud-room').textContent = room.notice || guessedStatus(room.players);
+}
+
+// Раз в 250 мс: таймер раунда и отсчёт до следующего раунда.
+function roomTick() {
+  const now = Date.now();
+  const timer = room.phase === 'round' && room.endsAt !== null;
+  $('hud-timer').hidden = !timer;
+  if (timer) {
+    const left = secondsLeft(room.endsAt, now);
+    $('hud-timer').textContent = left ? `Осталось ${left} с` : 'Время вышло';
+    $('hud-timer').classList.toggle('urgent', left <= 5);
+  }
+  if (room.phase === 'results' && room.nextAt !== null) {
+    const left = secondsLeft(room.nextAt, now);
+    $('room-next').textContent = left ? `Следующий раунд через ${left}…` : 'Следующий раунд…';
+  }
+}
+
+function stopRoomTick() {
+  clearInterval(room.tick);
+  room.tick = null;
+}
+
+// Связь потеряна посреди игры: сказать об этом на том экране, где игрок сейчас.
+function roomLost(text) {
+  stopRoomTick();
+  $('lobby-error').textContent = text;
+  room.notice = text;
+  $('hud-room').textContent = text;
+  $('hud-timer').hidden = true;
+  $('room-next').textContent = text;
+}
+
+// Итоги раунда в комнате — тот же экран #result: на карте ответы всех игроков с именами,
+// под ней таблица раунда и отсчёт до следующего, который начнётся сам.
+function showRoomResults(msg) {
+  Object.assign(room, { index: msg.index, nextAt: msg.nextAt, endsAt: null, table: msg.table });
+  logRoomRound(msg);
+  const rows = roomResultRows(msg, room.playerId);
+  const place = msg.place;
+  const mine = msg.guesses.find((g) => g.playerId === room.playerId);
+  const answered = Boolean(mine) && mine.km !== null;
+  show('result');
+
+  $('result-country').textContent = `${flag(place.cc)} ${countryName(place.cc)}`;
+  $('result-distance').textContent = answered ? `Вы ошиблись на ${formatKm(mine.km)}` : 'Вы не ответили в этом раунде';
+  const forgiven = answered ? Math.min(place.forgiveKm, mine.km) : 0;
+  $('result-forgiven').textContent = forgiven >= 1 ? `Прощено ${formatKm(forgiven)}: разброс внутри страны` : '';
+  $('result-forgiven').hidden = forgiven < 1;
+  $('result-points').textContent = `+${(mine?.points ?? 0).toLocaleString('ru')} очков`;
+  renderRoomResultsTable(rows);
+  const last = msg.nextAt === null;
+  $('room-next').hidden = last;
+  $('next').textContent = 'Итоги';
+  $('next').hidden = !last || room.phase !== 'final';
+  roomTick();
+
+  // Карта — после панели: ей нужно знать высоту панели, чтобы точки не ушли под неё.
+  freshResultMap();
+  const actual = [place.lat, place.lon];
+  const points = [actual];
+  for (const r of rows) {
+    if (r.lat === null) continue;
+    const p = [r.lat, r.lon];
+    L.polyline([p, actual], { color: '#fff', dashArray: '6 8', weight: 2 }).addTo(resultMap);
+    // Имя — только textContent: строку Leaflet вставил бы как HTML, а имена вписывают другие игроки.
+    const label = document.createElement('span');
+    label.textContent = r.name;
+    L.circleMarker(p, { radius: 8, color: '#fff', weight: 2, fillColor: r.you ? '#e74c3c' : '#4f8bd6', fillOpacity: 1 })
+      .bindTooltip(label, { permanent: true, direction: 'top', offset: [0, -8], className: r.you ? 'room-label you' : 'room-label' })
+      .addTo(resultMap);
+    points.push(p);
+  }
+  L.circleMarker(actual, { radius: 9, color: '#fff', weight: 2, fillColor: '#3fb68b', fillOpacity: 1 }).addTo(resultMap);
+  const below = Math.min($('result-panel').offsetHeight + 40, $('result-map').offsetHeight * 0.6);
+  resultMap.fitBounds(points, { paddingTopLeft: [60, 60], paddingBottomRight: [60, below], maxZoom: 10 });
+}
+
+function renderRoomResultsTable(rows) {
+  const t = $('room-results');
+  t.innerHTML = '';
+  t.hidden = false;
+  const head = t.createTHead().insertRow();
+  for (const h of ['Игрок', 'Ошибка', 'Очки', 'Всего']) head.append(Object.assign(document.createElement('th'), { textContent: h }));
+  const body = t.createTBody();
+  for (const r of rows) {
+    const row = body.insertRow();
+    if (r.you) row.className = 'you';
+    row.insertCell().textContent = r.name;
+    row.insertCell().textContent = r.distance;
+    row.insertCell().textContent = `+${r.points.toLocaleString('ru')}`;
+    row.insertCell().textContent = r.total.toLocaleString('ru');
+  }
+}
+
+// Свой раунд из итогов комнаты — в лог: место (оно открывается только в итогах) и свой ответ.
+// Тот, кто вошёл уже после раунда, в нём не играл: ему нечего записывать.
+function logRoomRound(msg) {
+  if (state.room !== room.id || msg.index <= room.loggedIndex) return;
+  const mine = msg.guesses.find((g) => g.playerId === room.playerId);
+  if (!mine) return;
+  room.loggedIndex = msg.index;
+  const { src, id, lat, lon, cc } = msg.place;
+  state.rounds.push({ src, id, lat, lon, cc, kind: room.kinds.get(id) ?? null });
+  state.guesses.push({ lat: mine.lat, lon: mine.lon, km: mine.km, points: mine.points });
+}
+
+// Итог игры в комнате — экран #final: таблица всех игроков по раундам, своя строка выделена.
+// Ссылка «те же места» и копирование результата — только для своей игры.
+function showRoomFinal() {
+  stopRoomTick();
+  show('final');
+  $('final-total').textContent = 'Итоги комнаты';
+  $('copy-link').hidden = true;
+  $('copy-result').hidden = true;
+  $('copied').hidden = true;
+  const t = $('final-table');
+  t.innerHTML = '';
+  t.classList.add('room');
+  const n = room.roundsTotal;
+  const head = t.createTHead().insertRow();
+  const th = (text) => head.append(Object.assign(document.createElement('th'), { textContent: text }));
+  th('');
+  th('Игрок');
+  for (let i = 1; i <= n; i++) th(String(i));
+  th('Всего');
+  const body = t.createTBody();
+  for (const r of roomFinalRows(room.table, room.playerId)) {
+    const row = body.insertRow();
+    if (r.you) row.className = 'you';
+    row.insertCell().textContent = `${r.place}.`;
+    row.insertCell().textContent = r.name;
+    for (let i = 0; i < n; i++) {
+      const cell = row.insertCell();
+      cell.className = 'num';
+      cell.textContent = (r.points[i] ?? 0).toLocaleString('ru');
+    }
+    row.insertCell().textContent = r.total.toLocaleString('ru');
+  }
 }
 
 // Меню снова главное: без ссылки друга или комнаты в адресе.
@@ -708,6 +957,10 @@ async function init() {
     roomSend({ type: 'start' });
   };
   $('guess').onclick = () => {
+    if (room.phase === 'round') {
+      roomGuess();
+      return;
+    }
     const round = state.rounds[state.index];
     const ll = guessMarker.getLatLng();
     const guess = { lat: ll.lat, lon: ll.lng };
@@ -719,6 +972,10 @@ async function init() {
     showResult(round, guess);
   };
   $('next').onclick = () => {
+    if (room.phase) {
+      showRoomFinal();
+      return;
+    }
     state.index++;
     if (state.index < state.rounds.length) startRound();
     else showFinal();
@@ -732,7 +989,7 @@ async function init() {
   window.addEventListener('resize', () => panoViewer?.resize?.());
   // Страницу закрыли посреди игры: последнее состояние уходит в лог через sendBeacon.
   window.addEventListener('pagehide', () => {
-    if (state.rounds.length && !state.finished) postLog(true);
+    if ((state.rounds.length || state.room) && !state.finished) postLog(true);
   });
 
   try {
