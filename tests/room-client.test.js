@@ -316,3 +316,27 @@ test('reconnectDelay: 1, 2, 4, 8 s, then every 10 s, giving up after about 2 min
   assert.equal(MG.reconnectDelay(14), null);
   assert.equal(MG.reconnectDelay(1000), null);
 });
+
+test('roundWinners: everyone with the best points of the round; nobody when the best is 0', () => {
+  const g = (playerId, points) => ({ playerId, points });
+  assert.deepEqual(MG.roundWinners([g('a', 4100), g('b', 4870), g('c', 300)]), ['b']);
+  assert.deepEqual(MG.roundWinners([g('a', 4870), g('b', 4870), g('c', 300)]), ['a', 'b']);
+  assert.deepEqual(MG.roundWinners([g('a', 0), g('b', 0)]), []);
+  assert.deepEqual(MG.roundWinners([]), []);
+});
+
+test('gameWinners: everyone with the best total, as name and total; nobody when it is 0', () => {
+  const row = (playerId, name, total) => ({ playerId, name, connected: true, total, points: [] });
+  assert.deepEqual(MG.gameWinners([row('a', 'Аня', 21340), row('b', 'Саша', 19875)]), [{ name: 'Аня', total: 21340 }]);
+  assert.deepEqual(MG.gameWinners([row('a', 'Аня', 9000), row('b', 'Миша', 9000), row('c', 'Лена', 100)]),
+    [{ name: 'Аня', total: 9000 }, { name: 'Миша', total: 9000 }]);
+  assert.deepEqual(MG.gameWinners([row('a', 'Аня', 0)]), []);
+  assert.deepEqual(MG.gameWinners([]), []);
+});
+
+test('joinNames: one name, two with "и", more with commas and "и" before the last', () => {
+  assert.equal(MG.joinNames(['Аня']), 'Аня');
+  assert.equal(MG.joinNames(['Аня', 'Миша']), 'Аня и Миша');
+  assert.equal(MG.joinNames(['Аня', 'Миша', 'Лена']), 'Аня, Миша и Лена');
+  assert.equal(MG.joinNames([]), '');
+});

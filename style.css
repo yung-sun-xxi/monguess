@@ -72,14 +72,8 @@ h1 { margin: 0; font-size: 2.2rem; }
 .help li + li { margin-top: 4px; }
 .help b { color: var(--text); font-weight: 600; }
 
-.spinner {
-  width: 48px; height: 48px;
-  border: 4px solid #2c3746;
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
+/* The loading globe; fx.js draws it at this size (the sphere plus its shadow below). */
+#loader-globe { width: 128px; height: 150px; }
 
 /* Игра */
 #game, #result { position: fixed; inset: 0; }
@@ -716,3 +710,57 @@ html.setup-open { overflow: hidden; }
 
 .setup-actions { display: grid; gap: 10px; }
 #play-friends { font-size: 1.25rem; padding: 14px 16px; border-radius: 14px; font-weight: 800; }
+
+/* ---------- Effects driven by fx.js ---------- */
+
+/* Number reels: one strip of digits per reel; fx.js slides each by 20 cells of 1.25em. */
+.reels { display: inline-flex; vertical-align: bottom; }
+.reel { display: inline-block; height: 1.25em; line-height: 1.25em; overflow: hidden; }
+.reel > span { display: block; transition: transform 1s cubic-bezier(0.15, 0.85, 0.25, 1); }
+.reel i { display: block; font-style: normal; }
+.reel-gap { display: inline-block; width: 0.3em; }
+#result-points, #final-total { font-variant-numeric: tabular-nums; }
+
+.pop { animation: pop 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes pop { 40% { transform: scale(1.15); } }
+
+/* Solo totals: the rounds land in one row under the total while it spins. */
+#final-rounds { display: flex; justify-content: center; gap: 4px; flex-wrap: nowrap; max-width: 100%; }
+#final-rounds span {
+  flex: none;
+  font-size: 0.85rem; padding: 2px 8px; border-radius: 999px;
+  background: #24303e; color: var(--muted); font-variant-numeric: tabular-nums;
+  opacity: 0; transform: translateY(10px) scale(0.9);
+  transition: opacity 0.25s, transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#final-rounds span.in { opacity: 1; transform: none; }
+
+/* The winner of a room round: a warm row and a trophy that pops in by the name. */
+#room-results tr.win td { background: rgba(244, 201, 93, 0.16); }
+.trophy { display: inline-block; margin-left: 6px; }
+@media (prefers-reduced-motion: no-preference) {
+  .trophy { animation: trophy-in 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) 0.3s both; }
+}
+@keyframes trophy-in { from { transform: scale(0); } }
+
+#confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3000; }
+
+/* The winner screen at the end of a game. */
+#winner {
+  position: fixed; inset: 0; z-index: 2500;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 16px;
+  background: rgba(8, 11, 16, 0.82);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  text-align: center; cursor: pointer;
+  opacity: 0; transition: opacity 0.5s;
+}
+#winner.in { opacity: 1; }
+.winner-label { color: var(--muted); font-size: 1.1rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.winner-name { font-size: clamp(2.5rem, 12vw, 6rem); line-height: 1.1; overflow-wrap: anywhere; }
+.winner-points { color: var(--accent); font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) {
+  #winner.in .winner-name { animation: name-in 0.8s cubic-bezier(0.3, 1.5, 0.5, 1); }
+}
+@keyframes name-in { from { transform: scale(0.3); opacity: 0; } }
