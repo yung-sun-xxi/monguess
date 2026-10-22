@@ -1,0 +1,18 @@
+# The live-rooms Worker for MonGuess. Pages Functions cannot define a Durable Object class,
+# so the Room class lives here and the Pages project binds to it by script_name (see the
+# root wrangler.toml). The Worker has no public URL of its own: rooms are reached only
+# through /api/room/<id> on the site. scripts/deploy.sh deploys it before the Pages site.
+name = "monguess-rooms"
+main = "index.js"
+compatibility_date = "2026-06-01"
+workers_dev = false
+preview_urls = false
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# SQLite-backed Durable Objects are the kind the Workers Free plan allows.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
