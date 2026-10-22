@@ -1,10 +1,12 @@
 #!/bin/bash
-# Publish MonGuess to Cloudflare Pages. The keys come from the macOS Keychain and are
-# written only into the uploaded copy of config.js, never into the repository.
-# Keychain items: monguess-mapillary, monguess-google, monguess-cloudflare (API token
-# with "Cloudflare Pages: Edit" and "Workers KV Storage: Edit": the game log in functions/
-# is bound to a KV namespace, see wrangler.toml) and monguess-cloudflare-account (account
-# ID; the token cannot list accounts, so wrangler needs it explicitly).
+# Publish MonGuess: first the live-rooms Worker monguess-rooms (rooms/), then the site on
+# Cloudflare Pages, whose Durable Object binding points at that Worker. The keys come from
+# the macOS Keychain and are written only into the uploaded copy of config.js, never into
+# the repository. Keychain items: monguess-mapillary, monguess-google, monguess-cloudflare
+# (API token with "Cloudflare Pages: Edit", "Workers KV Storage: Edit" for the game log
+# bound in wrangler.toml, and "Workers Scripts: Edit" for the rooms Worker and its Durable
+# Object) and monguess-cloudflare-account (account ID; the token cannot list accounts, so
+# wrangler needs it explicitly).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -41,6 +43,9 @@ import json, os, sys
 config = {"mapillaryToken": os.environ["MG_MAPILLARY_TOKEN"], "googleApiKey": os.environ["MG_GOOGLE_API_KEY"]}
 open(sys.argv[1], "w").write("window.MG_CONFIG = %s;\n" % json.dumps(config))
 PY
+
+# The rooms Worker goes first: the Pages Function /api/room/<id> binds to its Room class.
+(cd rooms && npx --yes "$WRANGLER" deploy)
 
 # Without --force, wrangler 4.151 delegates creating a Pages project to Workers and fails;
 # once the project exists, later commands run against Pages directly.
