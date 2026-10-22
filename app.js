@@ -113,13 +113,12 @@ async function tryGoogle(lat, lon, spheres) {
   return googlePanoAt(lat, lon, google.maps.StreetViewSource.OUTDOOR, spheres === 'walk');
 }
 
-async function tryMapillary(lat, lon) {
-  const h = 0.04; // ≈ 9 × 9 км вокруг точки
-  const clampLon = (v) => Math.max(-180, Math.min(180, v));
-  const bbox = [clampLon(lon - h), lat - h, clampLon(lon + h), lat + h].map((v) => v.toFixed(5)).join(',');
-  const url = 'https://graph.mapillary.com/images'
-    + `?access_token=${encodeURIComponent(CFG.mapillaryToken)}`
-    + `&fields=id,is_pano,computed_geometry,geometry&bbox=${bbox}&limit=100`;
+// Снимки Mapillary ищем по векторным тайлам z14 (≈ 2,4 × 2,4 км у экватора): поиск Graph API
+// по квадрату больше ~600 м отвечает ошибкой. Null — тайл не скачался.
+const MAPILLARY_Z = 14;
+async function mapillaryTile([x, y]) {
+  const url = `https://tiles.mapillary.com/maps/vtp/mly1_public/2/${MAPILLARY_Z}/${x}/${y}`
+    + `?access_token=${encodeURIComponent(CFG.mapillaryToken)}`;
   let res;
   try {
     res = await fetch(url);
@@ -130,14 +129,23 @@ async function tryMapillary(lat, lon) {
     throw new Error('Mapillary не принял ключ. Проверьте mapillaryToken в config.js.');
   }
   if (!res.ok) return null;
-  const { data = [] } = await res.json();
-  const usable = data.filter((d) => d.computed_geometry || d.geometry);
-  if (!usable.length) return null;
-  const panos = usable.filter((d) => d.is_pano);
-  const pool = panos.length ? panos : usable;
-  const img = pool[Math.floor(Math.random() * pool.length)];
-  const [ilon, ilat] = (img.computed_geometry || img.geometry).coordinates;
-  return { src: 'm', id: String(img.id), lat: ilat, lon: ilon, kind: 'mapillary' };
+  try {
+    return MG.mapillaryImages(new Uint8Array(await res.arrayBuffer()), MAPILLARY_Z, x, y);
+  } catch {
+    return null;
+  }
+}
+
+async function tryMapillary(lat, lon) {
+  const tile = MG.tileAt(lat, lon, MAPILLARY_Z);
+  let images = await mapillaryTile(tile);
+  if (!images) return null;
+  // В пустом тайле смотрим 8 соседних: выходит примерно прежний радиус поиска в ~9 км.
+  if (!images.length) {
+    const near = await Promise.all(MG.tileNeighbours(...tile, MAPILLARY_Z).map(mapillaryTile));
+    images = near.flatMap((imgs) => imgs || []);
+  }
+  return MG.pickMapillaryImage(images);
 }
 
 async function findAt([lat, lon], sources, spheres) {
@@ -977,7 +985,7 @@ function availableSources() {
 function fillSourceSelect() {
   const have = availableSources();
   const options = [];
-  // Временно Google первым, он и выбран по умолчанию: Mapillary Graph API отдаёт пустоту (с 2026-10-19).
+  // Google первым, он и выбран по умолчанию.
   if (have.includes('g')) options.push(['g', 'Только Google']);
   if (have.length === 2) options.push(['gm', 'Google + Mapillary']);
   if (have.includes('m')) options.push(['m', 'Только Mapillary']);
@@ -985,8 +993,6 @@ function fillSourceSelect() {
   // Фотосферы бывают только у Google.
   const syncSpheres = () => {
     $('spheres-label').hidden = !$('source').value.includes('g');
-    // Временно: у нового приложения Mapillary Graph API отдаёт пустоту (с 2026-10-19).
-    $('mapillary-note').hidden = !$('source').value.includes('m');
   };
   $('source').onchange = syncSpheres;
   syncSpheres();
