@@ -1,5 +1,5 @@
-// Pure functions of MonGuess: scoring, geometry, country fix-ups, the friends link and the
-// game log record.
+// Pure functions of MonGuess: scoring, geometry, country fix-ups, the friends link, the game log
+// record and the browser side of live rooms.
 // No DOM and no network here, so Node runs these under tests (scripts/verify.sh);
 // the browser gets the same object as window.MG.
 (function () {
@@ -175,9 +175,62 @@
     };
   }
 
+  // The Russian plural of a count: 1 раунд, 2 раунда, 5 раундов, 11 раундов, 21 раунд.
+  function pluralRu(n, one, few, many) {
+    const d = n % 10;
+    const dd = n % 100;
+    if (d === 1 && dd !== 11) return one;
+    if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return few;
+    return many;
+  }
+
+  // ---------- Live rooms: the browser side (the room itself is rooms/rules.js) ----------
+
+  // What the room server accepts as a room id.
+  const ROOM_ID = /^[a-z0-9]{1,16}$/;
+
+  // One [a-z0-9] character per random byte: a room id or a playerId.
+  function idFromBytes(bytes) {
+    return Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+  }
+
+  // The room id of a '#r=<id>' address, or null for anything else, a malformed id included.
+  function roomIdFromHash(hash) {
+    if (typeof hash !== 'string' || !hash.startsWith('#r=')) return null;
+    const id = hash.slice(3);
+    return ROOM_ID.test(id) ? id : null;
+  }
+
+  // base: the page address without a hash (origin + pathname).
+  const roomLink = (base, id) => `${base}#r=${id}`;
+
+  // The room's WebSocket on the page's own host; loc is window.location or alike.
+  const roomSocketUrl = (loc, id) => `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/api/room/${id}`;
+
+  // The first message of the browser that makes a room. mode and timerSec come from the menu
+  // selects ('none' | 'timer', seconds as text); forgiveKm(cc) is the round's forgiveness
+  // radius, which the room scores with. Rounds keep only the fields the protocol names.
+  function buildRoomCreate({ playerId, name, mode, timerSec, rounds, forgiveKm }) {
+    return {
+      type: 'create',
+      playerId,
+      name: cleanName(name),
+      settings: mode === 'timer' ? { mode: 'timer', timerSec: Number(timerSec) } : { mode: 'none' },
+      rounds: rounds.map((r) => ({ src: r.src, id: r.id, lat: r.lat, lon: r.lon, cc: r.cc, forgiveKm: forgiveKm(r.cc) })),
+    };
+  }
+
+  // The room's settings (as the room sends them) in the words of the menu.
+  function describeRoomMode(settings) {
+    if (settings.mode !== 'timer') return 'Без времени — раунд идёт, пока все не ответят';
+    const n = settings.timerSec;
+    return `Таймер: ${n} ${pluralRu(n, 'секунда', 'секунды', 'секунд')} после первого ответа`;
+  }
+
   const api = {
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
+    pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;
