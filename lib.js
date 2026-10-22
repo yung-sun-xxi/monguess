@@ -52,7 +52,31 @@
     return 2 * 6371 * Math.asin(Math.sqrt(h));
   }
 
-  const scoreFor = (km) => Math.round(MAX_POINTS * Math.exp(-km / SCORE_SCALE_KM));
+  // The first forgiveKm of a miss are free: a big country is not punished for its size.
+  const scoreFor = (km, forgiveKm = 0) =>
+    Math.round(MAX_POINTS * Math.exp(-Math.max(0, km - forgiveKm) / SCORE_SCALE_KM));
+
+  const FORGIVE_CAP_KM = 300;
+
+  // How spread out a country's places are: the median distance from them to their centroid,
+  // at most 300 km. The centroid is the mean of unit vectors, not of degrees, so a country
+  // across the antimeridian (Fiji) is not centred on the other side of the planet.
+  function forgivenessKm(list) {
+    if (!list || list.length < 2) return 0;
+    const rad = (d) => (d * Math.PI) / 180;
+    let x = 0, y = 0, z = 0;
+    for (const [lat, lon] of list) {
+      x += Math.cos(rad(lat)) * Math.cos(rad(lon));
+      y += Math.cos(rad(lat)) * Math.sin(rad(lon));
+      z += Math.sin(rad(lat));
+    }
+    const deg = (r) => (r * 180) / Math.PI;
+    const centre = { lat: deg(Math.atan2(z, Math.hypot(x, y))), lon: deg(Math.atan2(y, x)) };
+    const d = list.map(([lat, lon]) => distanceKm({ lat, lon }, centre)).sort((a, b) => a - b);
+    const mid = d.length >> 1;
+    const median = d.length % 2 ? d[mid] : (d[mid - 1] + d[mid]) / 2;
+    return Math.min(median, FORGIVE_CAP_KM);
+  }
 
   function formatKm(km) {
     if (km < 1) return `${Math.round(km * 1000)} м`;
@@ -152,8 +176,8 @@
   }
 
   const api = {
-    MAX_POINTS, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, formatKm,
-    resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
+    MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
+    formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;
