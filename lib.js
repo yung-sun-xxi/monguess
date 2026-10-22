@@ -52,15 +52,33 @@
     return 2 * 6371 * Math.asin(Math.sqrt(h));
   }
 
-  // The first forgiveKm of a miss are free: a big country is not punished for its size.
+  // A miss of km in a country whose places spread forgiveKm from its centre (forgivenessKm).
+  // Nothing is subtracted: a big country's curve just decays slower, so every kilometre closer
+  // still scores more. forgiveKm 0 is GeoGuessr's own curve, the classic scoring mode.
   const scoreFor = (km, forgiveKm = 0) =>
-    Math.round(MAX_POINTS * Math.exp(-Math.max(0, km - forgiveKm) / SCORE_SCALE_KM));
+    Math.round(MAX_POINTS * Math.exp(-km / (SCORE_SCALE_KM + 2 * forgiveKm)));
+
+  // The two scoring modes of the new-game window. Anything else, a missing mode included (an
+  // older page, link or room), is the default, size-aware.
+  const scoringMode = (scoring) => (scoring === 'classic' ? 'classic' : 'size');
+
+  // What the size of the country gave over classic scoring for the same miss.
+  const sizeBonus = (km, forgiveKm) => scoreFor(km, forgiveKm) - scoreFor(km, 0);
+
+  // A guess of a solo game (or a friends link) scored: forgiveKm is the round's country spread,
+  // which classic scoring ignores.
+  function scoreGuess(round, guess, forgiveKm, scoring) {
+    const km = distanceKm(round, guess);
+    const spread = scoringMode(scoring) === 'classic' ? 0 : forgiveKm;
+    return { km, points: scoreFor(km, spread), bonus: sizeBonus(km, spread) };
+  }
 
   const FORGIVE_CAP_KM = 300;
 
   // How spread out a country's places are: the median distance from them to their centroid,
-  // at most 300 km. The centroid is the mean of unit vectors, not of degrees, so a country
-  // across the antimeridian (Fiji) is not centred on the other side of the planet.
+  // at most 300 km. scoreFor stretches its curve by it in size-aware scoring. The centroid is
+  // the mean of unit vectors, not of degrees, so a country across the antimeridian (Fiji) is
+  // not centred on the other side of the planet.
   function forgivenessKm(list) {
     if (!list || list.length < 2) return 0;
     const rad = (d) => (d * Math.PI) / 180;
@@ -97,24 +115,34 @@
     return TERRITORY_OWNER[target] === found ? target : found;
   }
 
-  // The friends link: the rounds as URL-safe base64 of [src, id, lat, lon, cc] tuples.
-  function encodeChallenge(rounds) {
+  // The friends link: the rounds as URL-safe base64 of [src, id, lat, lon, cc] tuples. A classic
+  // game puts the string 'c' before them; a size-aware one stays the plain list, exactly the
+  // link of the time before scoring modes, so either kind of page opens it.
+  const CLASSIC_MARK = 'c';
+  function encodeChallenge(rounds, scoring) {
     const compact = rounds.map((r) => [r.src, r.id, +r.lat.toFixed(6), +r.lon.toFixed(6), r.cc]);
-    return btoa(JSON.stringify(compact)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const list = scoringMode(scoring) === 'classic' ? [CLASSIC_MARK, ...compact] : compact;
+    return btoa(JSON.stringify(list)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  // Null for anything that is not a well-formed link: a truncated or hand-edited one must
-  // not reach the game as NaN scores or a TypeError.
+  // { scoring, rounds }, or null for anything that is not a well-formed link: a truncated or
+  // hand-edited one must not reach the game as NaN scores or a TypeError.
   function decodeChallenge(str) {
     try {
-      const list = JSON.parse(atob(str.replace(/-/g, '+').replace(/_/g, '/')));
-      if (!Array.isArray(list) || !list.length) return null;
+      let list = JSON.parse(atob(str.replace(/-/g, '+').replace(/_/g, '/')));
+      if (!Array.isArray(list)) return null;
+      let scoring = 'size';
+      if (list[0] === CLASSIC_MARK) {
+        scoring = 'classic';
+        list = list.slice(1);
+      }
+      if (!list.length) return null;
       const rounds = list.map(([src, id, lat, lon, cc]) => ({ src, id: String(id ?? ''), lat, lon, cc }));
       const valid = (r) => (r.src === 'g' || r.src === 'm') && r.id !== ''
         && Number.isFinite(r.lat) && Math.abs(r.lat) <= 90
         && Number.isFinite(r.lon) && Math.abs(r.lon) <= 180
         && typeof r.cc === 'string' && /^[A-Z]{2}$/.test(r.cc);
-      return rounds.every(valid) ? rounds : null;
+      return rounds.every(valid) ? { scoring, rounds } : null;
     } catch {
       return null;
     }
@@ -150,11 +178,13 @@
   // The record app.js posts to /api/log, one per game. Rounds keep how the imagery was found
   // (kind: Google's own, a person's photosphere, Mapillary); a friends link does not carry it,
   // so its rounds have kind null, and its settings were the friend's, so settings are null.
+  // scoring is the game's scoring mode, 'size' or 'classic', in every record: a friends link and
+  // a room carry theirs.
   // A room game carries its room id in room (null otherwise). A room reveals its places one
   // round at a time, so its rounds are only the ones played so far; roundsTotal, the room's
   // count, decides whether it was played to the end. Without it the rounds are the whole game.
   // Only the fields listed here leave the browser.
-  function buildLogRecord({ id, startedAt, buildMs, name, settings, challenge, rounds, guesses, errors, room, roundsTotal }) {
+  function buildLogRecord({ id, startedAt, buildMs, name, settings, challenge, scoring, rounds, guesses, errors, room, roundsTotal }) {
     rounds = rounds || [];
     guesses = guesses || [];
     return {
@@ -167,6 +197,7 @@
         ? null
         : { sources: settings.sources, spheres: settings.spheres, rounds: settings.rounds },
       challenge: Boolean(challenge),
+      scoring: scoringMode(scoring),
       rounds: rounds.map((r) => ({
         src: r.src, id: r.id, cc: r.cc, lat: r.lat, lon: r.lon,
         kind: LOG_KINDS.includes(r.kind) ? r.kind : null,
@@ -186,6 +217,13 @@
     if (d === 1 && dd !== 11) return one;
     if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return few;
     return many;
+  }
+
+  // The line under a round's distance: what the country's size added. '' (the line is hidden)
+  // when that is under 1 point, which is always the case in classic scoring.
+  function sizeBonusText(bonus) {
+    if (!(bonus >= 1)) return '';
+    return `+${bonus.toLocaleString('ru')} ${pluralRu(bonus, 'очко', 'очка', 'очков')} за размер страны`;
   }
 
   // ---------- Live rooms: the browser side (the room itself is rooms/rules.js) ----------
@@ -212,15 +250,21 @@
   const roomSocketUrl = (loc, id) => `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/api/room/${id}`;
 
   // The first message of the browser that makes a room. mode and timerSec come from the menu
-  // selects ('none' | 'timer', seconds as text); forgiveKm(cc) is the round's forgiveness
-  // radius, which the room scores with. Rounds keep only the fields the protocol names.
-  function buildRoomCreate({ playerId, name, mode, timerSec, rounds, forgiveKm }) {
+  // selects ('none' | 'timer', seconds as text), scoring from the scoring select ('size' |
+  // 'classic'); forgiveKm(cc) is the round's country spread, which the room scores with. A
+  // classic room sends 0 for every round: the room itself scores both modes the same way.
+  // Rounds keep only the fields the protocol names.
+  function buildRoomCreate({ playerId, name, mode, timerSec, scoring, rounds, forgiveKm }) {
+    const classic = scoringMode(scoring) === 'classic';
+    const timing = mode === 'timer' ? { mode: 'timer', timerSec: Number(timerSec) } : { mode: 'none' };
     return {
       type: 'create',
       playerId,
       name: cleanName(name),
-      settings: mode === 'timer' ? { mode: 'timer', timerSec: Number(timerSec) } : { mode: 'none' },
-      rounds: rounds.map((r) => ({ src: r.src, id: r.id, lat: r.lat, lon: r.lon, cc: r.cc, forgiveKm: forgiveKm(r.cc) })),
+      settings: { ...timing, scoring: scoringMode(scoring) },
+      rounds: rounds.map((r) => ({
+        src: r.src, id: r.id, lat: r.lat, lon: r.lon, cc: r.cc, forgiveKm: classic ? 0 : forgiveKm(r.cc),
+      })),
     };
   }
 
@@ -229,6 +273,14 @@
     if (settings.mode !== 'timer') return 'Без времени — раунд идёт, пока все не ответят';
     const n = settings.timerSec;
     return `Таймер: ${n} ${pluralRu(n, 'секунда', 'секунды', 'секунд')} после первого ответа`;
+  }
+
+  // A scoring mode in the words of the menu, for the lobby. A room from before scoring modes has
+  // none: it is size-aware.
+  function describeScoring(scoring) {
+    return scoringMode(scoring) === 'classic'
+      ? 'Подсчёт очков: классический, как в GeoGuessr'
+      : 'Подсчёт очков: с учётом размера страны';
   }
 
   // "Ответили 2 из 3" while a room round waits. Only connected players count: someone who
@@ -522,6 +574,7 @@
 
   const api = {
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
+    scoringMode, sizeBonus, scoreGuess, sizeBonusText, describeScoring,
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
     guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
