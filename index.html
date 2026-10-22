@@ -24,10 +24,11 @@
       </label>
 
       <button id="start" class="primary">Играть</button>
+      <button id="play-friends">Играть с друзьями</button>
       <button id="new-instead" class="link" hidden>или начать свою игру</button>
       <p id="menu-error" class="error"></p>
 
-      <!-- Главная для нового игрока. По ссылке друга app.js прячет её целиком. -->
+      <!-- Главная для нового игрока. По ссылке друга или в комнату app.js прячет её целиком. -->
       <div id="landing">
         <section id="how-to" class="help">
           <h2>Как играть</h2>
@@ -58,6 +59,20 @@
                 <option value="any">Любые, даже одна точка</option>
               </select>
             </label>
+            <label>Режим игры с друзьями
+              <select id="room-mode">
+                <option value="none" selected>Без времени — раунд идёт, пока все не ответят</option>
+                <option value="timer">Таймер после первого ответа</option>
+              </select>
+            </label>
+            <label id="room-timer-label" hidden>Секунд после первого ответа
+              <select id="room-timer">
+                <option>15</option>
+                <option selected>30</option>
+                <option>60</option>
+                <option>120</option>
+              </select>
+            </label>
             <p id="mapillary-note" class="note" hidden>
               Mapillary сейчас не отдаёт снимки (сбой на их стороне), поэтому места с ним ищутся медленно.
               Пока лучше выбрать «Только Google».
@@ -81,6 +96,8 @@
                 было пройтись.</li>
               <li><b>Любые</b> — даже одиночный снимок: можно только оглядеться, но не сдвинуться.</li>
             </ul>
+            <p><b>Режим игры с друзьями</b> — только для комнаты: либо раунд ждёт всех, либо после первого
+              ответа остальным даётся столько секунд, сколько выбрано.</p>
           </div>
         </details>
       </div>
@@ -90,6 +107,25 @@
   <section id="loading" class="screen" hidden>
     <div class="spinner"></div>
     <p id="loading-text"></p>
+  </section>
+
+  <section id="lobby" class="screen" hidden>
+    <h1>Комната</h1>
+    <p class="sub">Отправьте ссылку друзьям. Когда все соберутся, любой может начать.</p>
+    <div id="lobby-link-box">
+      <input id="lobby-link" type="text" readonly aria-label="Ссылка на комнату">
+      <button id="lobby-copy">Скопировать</button>
+    </div>
+    <p id="lobby-copied" class="note" hidden></p>
+    <p id="lobby-info" class="note"></p>
+    <ul id="lobby-players"></ul>
+    <button id="lobby-start" class="primary">Начать</button>
+    <p id="lobby-error" class="error"></p>
+  </section>
+
+  <!-- Временная заглушка вместо раунда в комнате: настоящий экран раунда — issue #25. -->
+  <section id="room-round" class="screen" hidden>
+    <h1 id="room-round-text"></h1>
   </section>
 
   <section id="game" hidden>

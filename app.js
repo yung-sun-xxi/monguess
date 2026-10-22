@@ -5,6 +5,7 @@ const CFG = window.MG_CONFIG || {};
 const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, forgivenessKm, formatKm,
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
+  pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
@@ -235,7 +236,7 @@ function postLog(beacon = false) {
 // ---------- Экраны ----------
 
 function show(id) {
-  for (const s of ['menu', 'loading', 'game', 'result', 'final']) $(s).hidden = s !== id;
+  for (const s of ['menu', 'loading', 'lobby', 'room-round', 'game', 'result', 'final']) $(s).hidden = s !== id;
 }
 
 function fail(message) {
@@ -371,14 +372,15 @@ function resultText() {
   });
 }
 
-async function copy(text, message) {
+// target — где показать, что скопировано: на итогах игры или в комнате.
+async function copy(text, message, target = 'copied') {
   try {
     await navigator.clipboard.writeText(text);
-    $('copied').textContent = message;
+    $(target).textContent = message;
   } catch {
-    $('copied').textContent = text;
+    $(target).textContent = text;
   }
-  $('copied').hidden = false;
+  $(target).hidden = false;
 }
 
 // ---------- Имя игрока ----------
@@ -406,6 +408,152 @@ function nameMissing() {
   $('player-name').classList.add('invalid');
   $('player-name').focus();
   return true;
+}
+
+// ---------- Комната: игра с друзьями вживую ----------
+
+// Один сокет на комнату: подключиться, отправить JSON, разобрать ответ по type в roomHandlers.
+// Протокол сообщений описан в начале rooms/rules.js. playerId пока живёт только в памяти:
+// перезагрузка страницы входит в комнату новым игроком.
+const room = { id: '', playerId: '', ws: null, phase: '', settings: null, roundsTotal: 0, players: [] };
+
+const randomId = (length) => idFromBytes(crypto.getRandomValues(new Uint8Array(length)));
+const pageBase = () => `${location.origin}${location.pathname}`;
+
+const ROOM_ERRORS = {
+  'no-room': 'Комнаты по этой ссылке нет: игра давно закончилась или ссылка набрана с ошибкой.',
+  'bad-name': nameError(''),
+  started: 'Игра уже началась.',
+};
+const roomErrorText = (msg) => ROOM_ERRORS[msg.code] || `Комната не приняла запрос: ${msg.message}`;
+
+function roomSend(msg) {
+  if (room.ws?.readyState === WebSocket.OPEN) room.ws.send(JSON.stringify(msg));
+}
+
+// Открыть сокет комнаты id и первым сообщением отправить first (create или join).
+// Пока не пришло первое state, игрок ещё на экране загрузки: сбой возвращает его в меню.
+function roomConnect(id, first) {
+  room.id = id;
+  room.playerId = first.playerId;
+  room.phase = '';
+  const ws = new WebSocket(roomSocketUrl(location, id));
+  room.ws = ws;
+  ws.onopen = () => roomSend(first);
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    roomHandlers[msg.type]?.(msg);
+  };
+  ws.onclose = () => {
+    if (room.ws !== ws) return; // закрыли сами
+    room.ws = null;
+    if (!room.phase) fail('Не удалось подключиться к комнате. Проверьте интернет и попробуйте ещё раз.');
+    else $('lobby-error').textContent = 'Связь с комнатой потеряна. Обновите страницу, чтобы войти снова.';
+  };
+}
+
+const roomHandlers = {
+  state(msg) {
+    const entering = !room.phase;
+    Object.assign(room, { phase: msg.phase, settings: msg.settings, roundsTotal: msg.roundsTotal, players: msg.players });
+    if (entering) history.replaceState(null, '', roomLink(pageBase(), room.id));
+    if (msg.phase === 'lobby') showLobby();
+    else showRoomRound(msg.index, msg.roundsTotal);
+  },
+  players(msg) {
+    room.players = msg.players;
+    renderPlayers();
+  },
+  round(msg) {
+    room.phase = 'round';
+    showRoomRound(msg.index, msg.of);
+  },
+  error(msg) {
+    if (room.phase) {
+      $('lobby-error').textContent = roomErrorText(msg);
+      return;
+    }
+    // В комнату не пустили: сокет больше не нужен.
+    const ws = room.ws;
+    room.ws = null;
+    ws?.close();
+    if (msg.code === 'no-room') leaveRoomLink();
+    fail(roomErrorText(msg));
+  },
+};
+
+async function createRoom() {
+  const search = menuSearch();
+  if (!search) return;
+  let rounds;
+  try {
+    ({ rounds } = await findPlaces(search));
+  } catch (e) {
+    fail(e.message);
+    return;
+  }
+  $('loading-text').textContent = 'Создаю комнату…';
+  roomConnect(randomId(10), buildRoomCreate({
+    playerId: room.playerId || randomId(16),
+    name: $('player-name').value,
+    mode: $('room-mode').value,
+    timerSec: $('room-timer').value,
+    rounds,
+    forgiveKm: forgiveFor,
+  }));
+}
+
+function joinRoom(id) {
+  $('menu-error').textContent = '';
+  show('loading');
+  $('loading-text').textContent = 'Вхожу в комнату…';
+  roomConnect(id, { type: 'join', playerId: room.playerId || randomId(16), name: cleanName($('player-name').value) });
+}
+
+function showLobby() {
+  show('lobby');
+  $('lobby-link').value = roomLink(pageBase(), room.id);
+  const n = room.roundsTotal;
+  $('lobby-info').textContent = `${n} ${pluralRu(n, 'раунд', 'раунда', 'раундов')} · ${describeRoomMode(room.settings)}`;
+  renderPlayers();
+}
+
+// Имена — только textContent: их вписывают другие игроки.
+function renderPlayers() {
+  const list = $('lobby-players');
+  list.innerHTML = '';
+  for (const p of room.players) {
+    const li = document.createElement('li');
+    li.textContent = p.name;
+    if (p.playerId === room.playerId) {
+      const you = document.createElement('span');
+      you.className = 'you';
+      you.textContent = ' (вы)';
+      li.append(you);
+    }
+    if (!p.connected) {
+      li.classList.add('away');
+      li.title = 'Не в сети';
+    }
+    list.append(li);
+  }
+}
+
+// Временно, до экрана раунда (#25): только номер раунда.
+function showRoomRound(index, of) {
+  show('room-round');
+  $('room-round-text').textContent = `Раунд ${index + 1} из ${of}`;
+}
+
+// Меню снова главное: без ссылки друга или комнаты в адресе.
+function leaveRoomLink() {
+  history.replaceState(null, '', location.pathname);
+  $('challenge-note').hidden = true;
+  $('landing').hidden = false;
+  $('new-instead').hidden = true;
+  $('play-friends').hidden = false;
+  $('start').textContent = 'Играть';
 }
 
 // ---------- Запуск ----------
@@ -443,29 +591,42 @@ async function play(rounds) {
   startRound();
 }
 
-async function newGame() {
+// Настройки поиска мест из меню — общие для своей игры и комнаты. Null, если искать нечем:
+// сообщение об этом уже на экране.
+function menuSearch() {
   $('menu-error').textContent = '';
   if (!places) {
     fail('Не загрузился data/places.json. Откройте игру через веб-сервер, а не как файл — см. README.');
-    return;
+    return null;
   }
   const sources = [...$('source').value];
   if (!sources.length) {
     fail('Нет ни одного ключа. Впишите mapillaryToken или googleApiKey в config.js — см. README.');
-    return;
+    return null;
   }
+  return { sources, spheres: $('spheres').value, count: Number($('rounds').value) };
+}
+
+// Места для игры под экраном загрузки. Сбой — исключение с текстом для игрока.
+// buildMs — только сам поиск, без загрузки Google.
+async function findPlaces({ sources, spheres, count }) {
   show('loading');
   $('loading-text').textContent = 'Загрузка…';
-  const count = Number($('rounds').value);
-  const spheres = $('spheres').value;
-  beginLog({ sources, spheres, rounds: count });
+  if (sources.includes('g') && !(await loadGoogle())) throw new Error('Не удалось загрузить Google Maps.');
+  const built = Date.now();
+  const rounds = await generateRounds(count, sources, spheres, (n, of) => {
+    $('loading-text').textContent = `Ищу место ${n} из ${of}…`;
+  });
+  return { rounds, buildMs: Date.now() - built };
+}
+
+async function newGame() {
+  const search = menuSearch();
+  if (!search) return;
+  beginLog({ sources: search.sources, spheres: search.spheres, rounds: search.count });
   try {
-    if (sources.includes('g') && !(await loadGoogle())) throw new Error('Не удалось загрузить Google Maps.');
-    const built = Date.now();
-    const rounds = await generateRounds(count, sources, spheres, (n, of) => {
-      $('loading-text').textContent = `Ищу место ${n} из ${of}…`;
-    });
-    state.buildMs = Date.now() - built;
+    const { rounds, buildMs } = await findPlaces(search);
+    state.buildMs = buildMs;
     play(rounds);
     // Ссылка на игру сразу в адресе: перезагрузка не теряет места, а скопировать её можно и в середине игры.
     history.replaceState(null, '', challengeUrl());
@@ -506,26 +667,45 @@ async function init() {
   const hasLink = location.hash.startsWith('#c=');
   const challenge = hasLink ? decodeChallenge(location.hash.slice(3)) : null;
   if (hasLink && !challenge) $('menu-error').textContent = 'Ссылка на игру повреждена. Попросите друга скопировать её ещё раз.';
+  const hasRoomLink = location.hash.startsWith('#r=');
+  const roomId = roomIdFromHash(location.hash);
+  if (hasRoomLink && !roomId) $('menu-error').textContent = 'Ссылка на комнату повреждена. Попросите друга скопировать её ещё раз.';
 
   if (challenge) {
     const n = challenge.length;
-    const word = n % 10 === 1 && n % 100 !== 11 ? 'раунд' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'раунда' : 'раундов';
-    $('challenge-note').textContent = `Друг позвал вас сыграть: ${n} ${word}, те же места.`;
+    $('challenge-note').textContent = `Друг позвал вас сыграть: ${n} ${pluralRu(n, 'раунд', 'раунда', 'раундов')}, те же места.`;
     $('challenge-note').hidden = false;
     $('landing').hidden = true;
     $('new-instead').hidden = false;
+    $('play-friends').hidden = true;
+  }
+  if (roomId) {
+    $('challenge-note').textContent = 'Вас позвали в комнату: впишите имя и войдите.';
+    $('challenge-note').hidden = false;
+    $('landing').hidden = true;
+    $('new-instead').hidden = false;
+    $('play-friends').hidden = true;
+    $('start').textContent = 'Войти';
   }
 
   $('start').onclick = () => {
     if (nameMissing()) return;
     if (challenge && location.hash.startsWith('#c=')) playChallenge(challenge);
+    else if (roomId && location.hash.startsWith('#r=')) joinRoom(roomId);
     else newGame();
   };
-  $('new-instead').onclick = () => {
-    history.replaceState(null, '', location.pathname);
-    $('challenge-note').hidden = true;
-    $('landing').hidden = false;
-    $('new-instead').hidden = true;
+  $('play-friends').onclick = () => {
+    if (nameMissing()) return;
+    createRoom();
+  };
+  $('new-instead').onclick = leaveRoomLink;
+  const syncRoomMode = () => { $('room-timer-label').hidden = $('room-mode').value !== 'timer'; };
+  $('room-mode').onchange = syncRoomMode;
+  syncRoomMode();
+  $('lobby-copy').onclick = () => copy($('lobby-link').value, 'Ссылка скопирована — отправьте её друзьям.', 'lobby-copied');
+  $('lobby-start').onclick = () => {
+    $('lobby-error').textContent = '';
+    roomSend({ type: 'start' });
   };
   $('guess').onclick = () => {
     const round = state.rounds[state.index];
