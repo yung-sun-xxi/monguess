@@ -388,6 +388,7 @@ let panoViewer = null;
 let prewarmed = null;
 
 // Вьюер Mapillary в контейнере el и обещание, которое выполнится, когда он покажет снимок.
+// Ждём первое из load и image: load бывает не всегда (снимок из кэша браузера — только image).
 function mapillaryViewer(el, id) {
   const viewer = new mapillary.Viewer({
     accessToken: CFG.mapillaryToken,
@@ -398,9 +399,11 @@ function mapillaryViewer(el, id) {
   const loaded = new Promise((resolve) => {
     const done = () => {
       viewer.off('load', done);
+      viewer.off('image', done);
       resolve();
     };
     viewer.on('load', done);
+    viewer.on('image', done);
   });
   return { viewer, loaded };
 }
