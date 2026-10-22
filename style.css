@@ -170,3 +170,26 @@ h1 { margin: 0; font-size: 2.2rem; }
 #final-table td { padding: 6px 10px; border-bottom: 1px solid #2c3746; text-align: left; }
 #final-table td:last-child { text-align: right; color: var(--accent); }
 .buttons { display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%); }
+
+/* Комната: раунд, итоги раунда и итог игры */
+#hud { flex-wrap: wrap; }
+#hud-timer { color: #ffd479; font-weight: 600; font-variant-numeric: tabular-nums; }
+#hud-timer.urgent { color: var(--error); }
+#guess-box.locked #guess-map { filter: grayscale(0.7) brightness(0.75); cursor: not-allowed; }
+
+#result-panel { max-height: calc(100% - 48px); overflow-y: auto; }
+#room-results { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 4px 0; }
+#room-results th { color: var(--muted); font-weight: 400; font-size: 0.8rem; padding: 2px 6px; text-align: right; }
+#room-results td { padding: 4px 6px; border-top: 1px solid #2c3746; text-align: right; font-variant-numeric: tabular-nums; }
+#room-results th:first-child, #room-results td:first-child { text-align: left; }
+#room-results td:nth-child(3) { color: var(--accent); }
+#room-results tr.you td, #final-table tr.you td { background: rgba(63, 182, 139, 0.16); font-weight: 600; }
+#room-next { color: var(--muted); margin: 0 0 4px; }
+.room-label { font-weight: 600; }
+.room-label.you { color: #c0392b; }
+
+#final-table.room { display: block; max-width: 100%; overflow-x: auto; }
+#final-table.room th { color: var(--muted); font-weight: 400; font-size: 0.85rem; padding: 4px 10px; text-align: right; }
+#final-table.room th:nth-child(2) { text-align: left; }
+#final-table.room td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#final-table.room td:first-child { color: var(--muted); }
