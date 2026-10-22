@@ -678,6 +678,14 @@
     return { src: 'm', id, lat, lon, kind: 'mapillary' };
   }
 
+  // The id of the round after `index` when that round is Mapillary, else null (the last round,
+  // or a Google one next). The game loads it ahead in a hidden viewer while the current round is
+  // played, so the next round starts without a black screen.
+  function prewarmId(rounds, index) {
+    const next = rounds[index + 1];
+    return next && next.src === 'm' ? next.id : null;
+  }
+
   const api = {
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
     scoringMode, sizeBonus, scoreGuess, sizeBonusText, describeScoring,
@@ -687,7 +695,7 @@
     guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
     NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells,
     parseRoomSeat, reconnectDelay, tileAt, tileNeighbours, tilePointToLatLon, decodeMvtLayer,
-    MAPILLARY_MIN_QUALITY, mapillarySequenceCandidates, mapillaryGraphPlace,
+    MAPILLARY_MIN_QUALITY, mapillarySequenceCandidates, mapillaryGraphPlace, prewarmId,
   };
 
   // ---------- Bad images ----------

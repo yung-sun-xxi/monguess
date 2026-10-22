@@ -8,7 +8,7 @@ const {
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
   guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
-  parseRoomSeat, reconnectDelay, NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells,
+  parseRoomSeat, reconnectDelay, NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells, prewarmId,
 } = window.MG;
 // Анимации (барабаны, конфетти, экран победителя, глобус загрузки) живут в fx.js.
 const FX = window.MGFX;
@@ -333,6 +333,9 @@ function postLog(beacon = false) {
 function show(id) {
   for (const s of ['menu', 'loading', 'lobby', 'game', 'result', 'final']) $(s).hidden = s !== id;
   if (id !== 'menu') closeSetup();
+  // Заранее загруженный раунд нужен только между раундами своей игры (экраны game и result).
+  // Меню, загрузка, лобби комнаты и итоги его убирают: каждый вьюер держит контекст WebGL.
+  if (id !== 'game' && id !== 'result') dropPrewarmed();
   // Глобус крутится, только пока виден экран загрузки.
   if (id === 'loading') stopGlobe ??= FX.startGlobe($('loader-globe'), globeDots);
   else {
@@ -378,38 +381,110 @@ const roomMode = () => document.querySelector('input[name="room-mode"]:checked')
 const total = () => state.guesses.reduce((s, g) => s + g.points, 0);
 
 let panoViewer = null;
-async function showPanorama(round) {
+// Следующий раунд Mapillary своей игры грузится заранее, пока игрок угадывает текущий: в скрытом
+// вьюере того же размера, что #pano. Когда раунд начнётся, вьюер просто переезжает в #pano —
+// 30–40 мс вместо 1–2,5 с чёрного экрана. Комнаты следующего места не знают, им это не нужно.
+// { id, viewer, el, loaded } или null.
+let prewarmed = null;
+
+// Вьюер Mapillary в контейнере el и обещание, которое выполнится, когда он покажет снимок.
+function mapillaryViewer(el, id) {
+  const viewer = new mapillary.Viewer({
+    accessToken: CFG.mapillaryToken,
+    container: el,
+    imageId: id,
+    component: { cover: false },
+  });
+  const loaded = new Promise((resolve) => {
+    const done = () => {
+      viewer.off('load', done);
+      resolve();
+    };
+    viewer.on('load', done);
+  });
+  return { viewer, loaded };
+}
+
+function dropPrewarmed() {
+  if (!prewarmed) return;
+  prewarmed.viewer.remove();
+  prewarmed.el.remove();
+  prewarmed = null;
+}
+
+// Загрузить раунд id заранее, в скрытом контейнере размера box (как #pano). current() — всё ли
+// ещё идёт тот раунд, после которого это нужно: после ожидания mapillary-js проверяем снова.
+// Сбой здесь не мешает игре: следующий раунд загрузится как обычно.
+async function prewarm(id, current, box) {
+  try {
+    await loadMapillary();
+  } catch {
+    return;
+  }
+  if (!current()) return;
+  dropPrewarmed();
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;left:0;top:0;width:${box.width}px;height:${box.height}px;`
+    + 'visibility:hidden;pointer-events:none';
+  document.body.appendChild(el);
+  try {
+    prewarmed = { id, el, ...mapillaryViewer(el, id) };
+  } catch {
+    el.remove();
+  }
+}
+
+// nextId — раунд, который загрузить заранее, когда этот покажется (своя игра, см. prewarmId);
+// null — ничего не грузить (комната, последний раунд, дальше Google).
+async function showPanorama(round, nextId = null) {
   if (round.src === 'm') await loadMapillary();
   if (panoViewer?.remove) panoViewer.remove(); // у Mapillary свой teardown
   panoViewer = null;
   const host = $('pano');
   host.innerHTML = '';
-  const el = document.createElement('div');
-  host.appendChild(el);
-  if (round.src === 'g') {
-    const pano = new google.maps.StreetViewPanorama(el, {
-      pano: round.id,
-      addressControl: false,
-      showRoadLabels: false,
-      fullscreenControl: false,
-      motionTracking: false,
-      motionTrackingControl: false,
-    });
-    // Панорама не загрузилась (чёрный экран и т. п.) — в лог, с номером раунда.
-    const roundNo = state.index + 1;
-    pano.addListener('status_changed', () => {
-      const status = pano.getStatus();
-      if (status !== google.maps.StreetViewStatus.OK) logError(roundNo, status);
-    });
-    panoViewer = pano;
+  const box = host.getBoundingClientRect();
+  let loaded;
+  if (round.src === 'm' && prewarmed?.id === round.id) {
+    // Этот раунд уже загружен заранее: вьюер переезжает в #pano.
+    const { el, viewer } = prewarmed;
+    loaded = prewarmed.loaded;
+    prewarmed = null;
+    el.style.cssText = 'width:100%;height:100%';
+    host.appendChild(el);
+    viewer.resize();
+    panoViewer = viewer;
   } else {
-    panoViewer = new mapillary.Viewer({
-      accessToken: CFG.mapillaryToken,
-      container: el,
-      imageId: round.id,
-      component: { cover: false },
-    });
+    dropPrewarmed(); // заранее загружен не этот раунд
+    const el = document.createElement('div');
+    host.appendChild(el);
+    if (round.src === 'g') {
+      const pano = new google.maps.StreetViewPanorama(el, {
+        pano: round.id,
+        addressControl: false,
+        showRoadLabels: false,
+        fullscreenControl: false,
+        motionTracking: false,
+        motionTrackingControl: false,
+      });
+      // Панорама не загрузилась (чёрный экран и т. п.) — в лог, с номером раунда.
+      const roundNo = state.index + 1;
+      pano.addListener('status_changed', () => {
+        const status = pano.getStatus();
+        if (status !== google.maps.StreetViewStatus.OK) logError(roundNo, status);
+      });
+      panoViewer = pano;
+      loaded = Promise.resolve(); // Google грузит свою панораму сам, следующий раунд можно сразу
+    } else {
+      ({ viewer: panoViewer, loaded } = mapillaryViewer(el, round.id));
+    }
   }
+  if (!nextId) return;
+  // Пока снимок грузился, раунд могли сменить или игру закончить: тогда заранее ничего не грузим.
+  const viewer = panoViewer;
+  const current = () => panoViewer === viewer && state.rounds[state.index] === round;
+  loaded.then(() => {
+    if (current()) prewarm(nextId, current, box);
+  });
 }
 
 let guessMap = null;
@@ -447,7 +522,7 @@ async function startRound() {
   $('hud-score').textContent = `Очки: ${total().toLocaleString('ru')}`;
   setBadButton(false);
   try {
-    await showPanorama(round);
+    await showPanorama(round, prewarmId(state.rounds, state.index));
   } catch (e) {
     if (state.rounds[state.index] !== round) return; // игру уже закончили кнопкой
     logError(state.index + 1, e.message);
