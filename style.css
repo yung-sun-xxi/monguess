@@ -632,6 +632,8 @@ html.setup-open .setup,
 @media (min-width: 640px) {
   .perks { grid-template-columns: 1fr 1fr; }
   .perks li:first-child { grid-column: 1 / -1; }
+  /* After the wide first card the rest go in pairs; a last card left alone takes the whole row. */
+  .perks li:last-child:nth-child(even) { grid-column: 1 / -1; }
   .perks li:first-child .perk-stat { font-size: 2.6rem; }
 }
 @media (min-width: 760px) {
