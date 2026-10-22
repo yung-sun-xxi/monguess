@@ -145,7 +145,7 @@ test('a player who comes back mid-game with the same playerId keeps their points
   sim.send({ type: 'start', playerId: 'a' });
   guess(sim, 'a', 48.85, 2.35);
   sim.send({ type: 'leave', playerId: 'b' });
-  sim.tick(5000);
+  sim.tick(R.GRACE_MS); // b is not waited for after the grace: the round ends
   sim.send({ type: 'join', playerId: 'a', name: 'Ann' });
   assert.deepEqual(Object.keys(sim.state.players), ['a', 'b']);
   assert.deepEqual(sim.state.players.a.points, [5000]);
@@ -186,13 +186,14 @@ test('no timer: the round waits for every connected player', () => {
   assert.equal(sim.state.phase, 'results');
 });
 
-test('no timer: a player who closed the page is not waited for and scores 0', () => {
+test('no timer: a player who closed the page is not waited for after the grace and scores 0', () => {
   const sim = room({ players: ['a', 'b', 'c'] });
   sim.send({ type: 'start', playerId: 'a' });
   guess(sim, 'a');
   sim.send({ type: 'leave', playerId: 'c' });
   assert.equal(sim.sent('results').length, 0);
   guess(sim, 'b');
+  sim.tick(R.GRACE_MS);
   const [results] = sim.sent('results');
   assert.ok(results, 'the round ended without c');
   const c = results.msg.guesses.find((g) => g.playerId === 'c');
@@ -200,12 +201,82 @@ test('no timer: a player who closed the page is not waited for and scores 0', ()
   assert.deepEqual(tableOf(results.msg).c, [0]);
 });
 
-test('no timer: the last unguessed player leaving ends the round at once', () => {
+test('no timer: the last unguessed player gone for good is waited for exactly GRACE_MS', () => {
+  const sim = room();
+  sim.send({ type: 'start', playerId: 'a' });
+  guess(sim, 'a');
+  sim.tick(3000);
+  sim.send({ type: 'leave', playerId: 'b' });
+  const [players] = sim.sent('players');
+  assert.equal(players.msg.players.find((p) => p.playerId === 'b').connected, false, 'shown as away at once');
+  assert.equal(R.GRACE_MS, 10000);
+  assert.equal(sim.alarmAt, T0 + 3000 + R.GRACE_MS, 'woken when the grace ends');
+  sim.tick(R.GRACE_MS - 1);
+  assert.equal(sim.sent('results').length, 0, 'still waiting within the grace');
+  sim.tick(1);
+  const [results] = sim.sent('results');
+  assert.ok(results, 'the round ended when the grace ran out');
+  assert.equal(results.msg.guesses.find((g) => g.playerId === 'b').points, 0);
+});
+
+test('no timer: a reload within the grace keeps the round open and the guess after rejoin counts', () => {
   const sim = room();
   sim.send({ type: 'start', playerId: 'a' });
   guess(sim, 'a');
   sim.send({ type: 'leave', playerId: 'b' });
+  assert.equal(sim.sent('results').length, 0, 'a reload does not end the round');
+  sim.tick(2000);
+  sim.send({ type: 'join', playerId: 'b', name: 'P-b' });
+  sim.tick(60000);
+  assert.equal(sim.sent('results').length, 0, 'back within the grace: waited for as before');
+  guess(sim, 'b', 48.85, 2.35);
+  const [results] = sim.sent('results');
+  assert.ok(results);
+  assert.ok(results.msg.guesses.find((g) => g.playerId === 'b').points > 0);
+});
+
+test('a player who left and came back is waited for again in the next round', () => {
+  const sim = room();
+  sim.send({ type: 'start', playerId: 'a' });
+  guess(sim, 'a');
+  sim.send({ type: 'leave', playerId: 'b' });
+  sim.tick(R.GRACE_MS);
   assert.equal(sim.sent('results').length, 1);
+  sim.send({ type: 'join', playerId: 'b', name: 'P-b' });
+  sim.tick(R.RESULTS_MS);
+  guess(sim, 'a');
+  sim.tick(R.GRACE_MS * 10);
+  assert.equal(sim.sent('results').length, 1, 'round 2 waits for b');
+  guess(sim, 'b');
+  assert.equal(sim.sent('results').length, 2);
+});
+
+test('timer: a leave never ends a timer round early within the grace; the countdown still governs', () => {
+  const sim = room({ mode: 'timer', timerSec: 30 });
+  sim.send({ type: 'start', playerId: 'a' });
+  guess(sim, 'a');
+  const endsAt = sim.state.endsAt;
+  sim.tick(6000);
+  sim.send({ type: 'leave', playerId: 'b' });
+  assert.equal(sim.sent('results').length, 0, 'not ended by the leave');
+  sim.tick(R.GRACE_MS - 1);
+  assert.equal(sim.sent('results').length, 0, 'not ended within the grace');
+  sim.send({ type: 'join', playerId: 'b', name: 'P-b' });
+  assert.equal(sim.state.endsAt, endsAt, 'the countdown goes on');
+  sim.tick(endsAt - sim.now - 1);
+  assert.equal(sim.sent('results').length, 0);
+  sim.tick(1);
+  assert.equal(sim.sent('results').length, 1, 'the countdown ended the round');
+});
+
+test('timer: a player gone for good stops being waited for when the grace ends, before the countdown', () => {
+  const sim = room({ mode: 'timer', timerSec: 60 });
+  sim.send({ type: 'start', playerId: 'a' });
+  guess(sim, 'a');
+  sim.send({ type: 'leave', playerId: 'b' });
+  sim.tick(R.GRACE_MS);
+  assert.equal(sim.sent('results').length, 1);
+  assert.ok(sim.now < T0 + 60000);
 });
 
 test('a round with nobody connected does not end by itself', () => {
