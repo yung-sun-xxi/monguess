@@ -88,3 +88,94 @@ test('pluralRu: Russian plural forms by the last digits', () => {
     '20 раундов', '21 раунд', '22 раунда', '25 раундов', '101 раунд', '111 раундов', '112 раундов', '0 раундов',
   ]);
 });
+
+// ---------- The room's rounds, results and final table on screen (#25) ----------
+
+test('guessedStatus: "Ответили N из M" counts connected players only', () => {
+  const p = (playerId, connected, guessed) => ({ playerId, name: playerId, connected, guessed });
+  assert.equal(MG.guessedStatus([p('a', true, true), p('b', true, true), p('c', true, false)]), 'Ответили 2 из 3');
+  assert.equal(MG.guessedStatus([p('a', true, false), p('b', true, false)]), 'Ответили 0 из 2');
+  // Someone who left counts neither as answered nor as waited for, guessed or not.
+  assert.equal(MG.guessedStatus([p('a', true, true), p('b', false, true), p('c', false, false), p('d', true, false)]),
+    'Ответили 1 из 2');
+  assert.equal(MG.guessedStatus([]), 'Ответили 0 из 0');
+});
+
+test('secondsLeft: whole seconds to a deadline, rounded up, never below 0', () => {
+  const at = 1_800_000_030_000;
+  assert.equal(MG.secondsLeft(at, at - 30_000), 30);
+  assert.equal(MG.secondsLeft(at, at - 29_001), 30);
+  assert.equal(MG.secondsLeft(at, at - 29_000), 29);
+  assert.equal(MG.secondsLeft(at, at - 1), 1);
+  assert.equal(MG.secondsLeft(at, at), 0);
+  assert.equal(MG.secondsLeft(at, at + 5_000), 0);
+});
+
+// A real results message: the room rules play one round of three players, Cat never guesses.
+function playedResults() {
+  const t = 1_800_000_000_000;
+  const rounds = [
+    { src: 'g', id: 'r1', lat: 41.3874, lon: 2.1686, cc: 'ES', forgiveKm: 0 },
+    { src: 'g', id: 'r2', lat: -33.8688, lon: 151.2093, cc: 'AU', forgiveKm: 0 },
+  ];
+  let s = R.step(null, { type: 'create', playerId: 'ann', name: 'Ann', settings: { mode: 'timer', timerSec: 10 }, rounds }, t).state;
+  s = R.step(s, { type: 'join', playerId: 'bob', name: 'Bob' }, t).state;
+  s = R.step(s, { type: 'join', playerId: 'cat', name: 'Cat' }, t).state;
+  s = R.step(s, { type: 'start', playerId: 'ann' }, t).state;
+  s = R.step(s, { type: 'guess', playerId: 'ann', round: 0, lat: 40.4168, lon: -3.7038 }, t).state;
+  s = R.step(s, { type: 'guess', playerId: 'bob', round: 0, lat: 41.39, lon: 2.17 }, t + 1000).state;
+  const { out } = R.step(s, { type: 'alarm' }, t + 10_000);
+  return out.find((o) => o.msg.type === 'results').msg;
+}
+
+test('roomResultRows: one row per player in table order, the guess, its points and the total', () => {
+  const results = playedResults();
+  const rows = MG.roomResultRows(results, 'ann');
+  assert.deepEqual(rows.map((r) => r.name), ['Bob', 'Ann', 'Cat']);
+  const [bob, ann, cat] = rows;
+  assert.equal(bob.you, false);
+  assert.equal(ann.you, true);
+  assert.equal(cat.you, false);
+  const g = (id) => results.guesses.find((x) => x.playerId === id);
+  assert.deepEqual(ann, {
+    playerId: 'ann', name: 'Ann', lat: 40.4168, lon: -3.7038,
+    distance: MG.formatKm(g('ann').km), points: g('ann').points, total: g('ann').points, you: true,
+  });
+  assert.equal(ann.distance, '505 км');
+  assert.equal(bob.points, g('bob').points);
+  assert.ok(bob.points > ann.points);
+  // No guess: no point on the map, no distance, 0 points.
+  assert.deepEqual(cat, { playerId: 'cat', name: 'Cat', lat: null, lon: null, distance: 'нет ответа', points: 0, total: 0, you: false });
+});
+
+test('roomResultRows: the total is the running one, not this round only', () => {
+  const results = {
+    guesses: [
+      { playerId: 'a', name: 'A', lat: 1, lon: 2, km: 0.4, points: 5000 },
+      { playerId: 'b', name: 'B', lat: 3, lon: 4, km: 1500, points: 1800 },
+    ],
+    table: [
+      { playerId: 'b', name: 'B', connected: true, total: 9000, points: [4000, 3200, 1800] },
+      { playerId: 'a', name: 'A', connected: false, total: 7000, points: [1000, 1000, 5000] },
+    ],
+  };
+  const rows = MG.roomResultRows(results, 'zzz');
+  assert.deepEqual(rows.map((r) => [r.name, r.distance, r.points, r.total, r.you]),
+    [['B', '1\u00a0500 км', 1800, 9000, false], ['A', '400 м', 5000, 7000, false]]);
+});
+
+test('roomFinalRows: place, name, points per round, total; ties share a place', () => {
+  const table = [
+    { playerId: 'a', name: 'A', connected: true, total: 9000, points: [5000, 4000] },
+    { playerId: 'b', name: 'B', connected: true, total: 7000, points: [3000, 4000] },
+    { playerId: 'c', name: 'C', connected: false, total: 7000, points: [7000, 0] },
+    { playerId: 'd', name: 'D', connected: true, total: 100, points: [0, 100] },
+  ];
+  assert.deepEqual(MG.roomFinalRows(table, 'c'), [
+    { place: 1, name: 'A', points: [5000, 4000], total: 9000, you: false },
+    { place: 2, name: 'B', points: [3000, 4000], total: 7000, you: false },
+    { place: 2, name: 'C', points: [7000, 0], total: 7000, you: true },
+    { place: 4, name: 'D', points: [0, 100], total: 100, you: false },
+  ]);
+  assert.deepEqual(MG.roomFinalRows([], 'a'), []);
+});
