@@ -13,6 +13,30 @@ test('scoreFor: 5000 at zero, GeoGuessr curve, falls monotonically to 0', () => 
   for (let d = 0; d < 20000; d += 250) assert.ok(MG.scoreFor(d) >= MG.scoreFor(d + 250));
 });
 
+test('scoreFor: a forgiveness radius comes off the distance before the curve', () => {
+  assert.equal(MG.scoreFor(350, 300), MG.scoreFor(50));
+  assert.equal(MG.scoreFor(200, 300), 5000);
+  assert.equal(MG.scoreFor(300, 300), 5000);
+  assert.equal(MG.scoreFor(4000, 300), MG.scoreFor(3700));
+  assert.equal(MG.scoreFor(350, 0), MG.scoreFor(350));
+});
+
+test('forgivenessKm: 0 without places or with one, capped at 300 km, small for a small country', () => {
+  const places = require('../data/places.json');
+  assert.equal(MG.forgivenessKm(undefined), 0);
+  assert.equal(MG.forgivenessKm([]), 0);
+  assert.equal(MG.forgivenessKm([[50.85, 4.35, 1000]]), 0);
+  assert.equal(MG.forgivenessKm(places.RU), 300);
+  const be = MG.forgivenessKm(places.BE);
+  assert.ok(be > 20 && be < 150, `BE got ${be}`);
+});
+
+test('forgivenessKm: a country across the antimeridian keeps a small radius', () => {
+  // 1° of longitude apart on the equator, ~111 km: each point is ~55 km from the centroid.
+  const r = MG.forgivenessKm([[0, 179.5, 1], [0, -179.5, 1]]);
+  assert.ok(r > 50 && r < 60, `got ${r}`);
+});
+
 test('distanceKm: Barcelona to Madrid, zero, across the antimeridian', () => {
   const bcn = { lat: 41.3851, lon: 2.1734 };
   const mad = { lat: 40.4168, lon: -3.7038 };
