@@ -390,6 +390,7 @@ async function startRound() {
   try {
     await showPanorama(round);
   } catch (e) {
+    if (state.rounds[state.index] !== round) return; // игру уже закончили кнопкой
     logError(state.index + 1, e.message);
     postLog();
     fail(e.message);
@@ -536,12 +537,14 @@ function nameMissing() {
 // kinds и search знает только создатель комнаты: как нашлись снимки и настройки поиска, для лога.
 // name — имя, с которым вошли. joined — на текущем сокете уже пришло state; retries — сколько
 // раз подряд переподключались, retry — таймер следующей попытки.
-const room = {
+// freshRoom() — состояние «не в комнате»: с него страница начинает, к нему возвращает «Закончить игру».
+const freshRoom = () => ({
   id: '', playerId: '', name: '', ws: null, phase: '', settings: null, roundsTotal: 0, players: [],
   index: -1, place: null, guessed: false, endsAt: null, nextAt: null, table: [], notice: '',
   loggedIndex: -1, tick: null, kinds: new Map(), search: null,
   joined: false, retries: 0, retry: null,
-};
+});
+const room = freshRoom();
 
 const randomId = (length) => idFromBytes(crypto.getRandomValues(new Uint8Array(length)));
 const pageBase = () => `${location.origin}${location.pathname}`;
@@ -1013,6 +1016,42 @@ function leaveRoomLink() {
   openSetup();
 }
 
+// ---------- Закончить игру ----------
+
+// Уйти из комнаты по своей воле. Сокет закрываем сами (room.ws = null до close(), так что
+// onclose не переподключается), сервер считает это уходом игрока. Место забывается: перезагрузка
+// не вернёт в комнату. Состояние комнаты — с нуля, чтобы «Угадать» и «Далее» снова вели свою
+// игру, а следующий вход получил новое место. HUD и экран итогов — снова как в своей игре.
+function leaveRoom() {
+  const ws = room.ws;
+  room.ws = null;
+  ws?.close();
+  stopRoomTick();
+  clearTimeout(room.retry);
+  forgetSeat(room.id);
+  if (state.room === room.id && !state.finished) postLog();
+  Object.assign(room, freshRoom());
+  for (const id of ['hud-room', 'hud-timer', 'hud-invite', 'room-results']) $(id).hidden = true;
+  $('next').hidden = false;
+  lockRoomGuess(false);
+}
+
+// «Да» в окне «Закончить игру?»: игра бросается без итогов и открывается главная с окном новой
+// игры. Брошенная игра уходит в лог один раз, незаконченной (finished остаётся false); потом
+// раунды и комната в state сбрасываются, чтобы pagehide не отправил её ещё раз.
+function endGame() {
+  $('end-dialog').close();
+  if (room.id) {
+    leaveRoom();
+  } else {
+    stopSoloNext();
+    if (state.rounds.length && !state.finished) postLog();
+  }
+  Object.assign(state, { rounds: [], guesses: [], index: 0, room: null, roundsTotal: 0 });
+  show('menu');
+  leaveRoomLink();
+}
+
 // ---------- Запуск ----------
 
 function availableSources() {
@@ -1177,6 +1216,11 @@ async function init() {
   });
   $('hud-invite').onclick = inviteToRoom;
   $('hud-bad').onclick = reportBad;
+  // «Закончить игру»: сначала своё окно подтверждения. «Нет» и Esc (его dialog понимает сам)
+  // закрывают окно, игра идёт дальше.
+  $('hud-end').onclick = () => $('end-dialog').showModal();
+  $('end-yes').onclick = endGame;
+  $('end-no').onclick = () => $('end-dialog').close();
   $('lobby-copy').onclick = () => copy($('lobby-link').value, 'Ссылка скопирована — отправьте её друзьям.', 'lobby-copied');
   $('lobby-start').onclick = () => {
     $('lobby-error').textContent = '';

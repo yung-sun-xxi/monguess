@@ -90,7 +90,23 @@ h1 { margin: 0; font-size: 2.2rem; }
   display: flex; gap: 12px;
 }
 #hud span { background: rgba(16, 21, 28, 0.85); padding: 6px 12px; border-radius: 8px; }
-#hud-bad { background: rgba(16, 21, 28, 0.85); padding: 6px 12px; }
+#hud-bad, #hud-end { background: rgba(16, 21, 28, 0.85); padding: 6px 12px; }
+
+/* «Закончить игру?»: окно поверх игры, Esc и «Нет» закрывают его */
+#end-dialog {
+  width: min(340px, calc(100vw - 32px));
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #2c3746;
+  border-radius: 12px;
+  padding: 20px 16px 16px;
+  text-align: center;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+#end-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+#end-dialog p { margin: 0 0 16px; }
+.end-buttons { display: flex; gap: 10px; }
+.end-buttons button { flex: 1; }
 
 #guess-box {
   position: absolute; right: 16px; bottom: 16px; z-index: 10;
