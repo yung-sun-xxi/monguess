@@ -94,25 +94,6 @@ const tileBytes = Uint8Array.from([
   }),
 ]);
 
-// A second tile for the panorama and quality cut. Every feature sits at the centre.
-// keys: 0 id, 1 is_pano, 2 quality_score
-// values: 0 true, 1 false, 2 0.95, 3 0.8, 4 0.79, 5 1 (all four doubles), 6.. ids 101..106 (uint)
-const qualityTile = Uint8Array.from(layer({
-  name: 'image',
-  extent: 4096,
-  keys: ['id', 'is_pano', 'quality_score'],
-  values: [value.bool(true), value.bool(false), value.double(0.95), value.double(0.8), value.double(0.79), value.double(1),
-    ...[101, 102, 103, 104, 105, 106].map((n) => value.uint(n))],
-  features: [
-    { id: 1, tags: [0, 6, 1, 0, 2, 2], geometry: points([[2048, 2048]]) }, // 101: pano, 0.95
-    { id: 2, tags: [0, 7, 1, 0, 2, 3], geometry: points([[2048, 2048]]) }, // 102: pano, 0.8 exactly
-    { id: 3, tags: [0, 8, 1, 0, 2, 4], geometry: points([[2048, 2048]]) }, // 103: pano, 0.79
-    { id: 4, tags: [0, 9, 1, 0], geometry: points([[2048, 2048]]) }, // 104: pano, no quality_score
-    { id: 5, tags: [0, 10, 1, 1, 2, 2], geometry: points([[2048, 2048]]) }, // 105: flat photo, 0.95
-    { id: 6, tags: [0, 11, 1, 0, 2, 5], geometry: points([[2048, 2048]]) }, // 106: pano, 1
-  ],
-}));
-
 // Latitude of a tile row edge by the other textbook formula, 2·atan(e^y) − π/2.
 const rowLat = (y, z) => ((2 * Math.atan(Math.exp(Math.PI * (1 - (2 * y) / 2 ** z))) - Math.PI / 2) * 180) / Math.PI;
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
@@ -182,50 +163,8 @@ test('decodeMvtLayer: the named layer only, every value type, exact 64-bit ids, 
   assert.deepEqual(features[3].points, []);
 });
 
-test('mapillaryImages: usable images with string ids, lat/lon and quality; an empty tile gives none', () => {
-  const imgs = MG.mapillaryImages(tileBytes, 14, 8296, 5636);
-  // No quality_score, or one that is not a number, is null.
-  assert.deepEqual(imgs.map((i) => [i.id, i.pano, i.quality]), [[PANO_ID, true, null], [BIG_ID, false, null], [SINT_ID, false, null]]);
-  assert.deepEqual(MG.mapillaryImages(qualityTile, 14, 8296, 5636).map((i) => [i.id, i.pano, i.quality]), [
-    ['101', true, 0.95], ['102', true, 0.8], ['103', true, 0.79], ['104', true, null], ['105', false, 0.95], ['106', true, 1],
-  ]);
-  const nw = MG.tilePointToLatLon(14, 8296, 5636, 0, 0, 4096);
-  assert.deepEqual([imgs[0].lat, imgs[0].lon], [nw.lat, nw.lon]);
-  const se = MG.tilePointToLatLon(14, 8296, 5636, 4096, 4096, 4096);
-  assert.deepEqual([imgs[2].lat, imgs[2].lon], [se.lat, se.lon]); // a multipoint takes its first point
-  assert.deepEqual(MG.mapillaryImages(Uint8Array.from(layer({ name: 'image', keys: [], values: [], features: [] })), 14, 0, 0), []);
-  assert.deepEqual(MG.mapillaryImages(Uint8Array.from(layer({ name: 'sequence', keys: [], values: [], features: [] })), 14, 0, 0), []);
-});
-
 test('MAPILLARY_MIN_QUALITY is 0.8', () => {
   assert.equal(MG.MAPILLARY_MIN_QUALITY, 0.8);
-});
-
-test('pickMapillaryImage: only a panorama with quality_score >= 0.8, spread evenly; null for none', () => {
-  const imgs = MG.mapillaryImages(qualityTile, 14, 8296, 5636);
-  const byId = (id) => imgs.filter((i) => i.id === id);
-  const c = imgs[0];
-  // Eligible: 101 (0.95), 102 (0.8), 106 (1), in that order; the pick is uniform among them.
-  assert.deepEqual(MG.pickMapillaryImage(imgs, () => 0), { src: 'm', id: '101', lat: c.lat, lon: c.lon, kind: 'mapillary' });
-  assert.equal(MG.pickMapillaryImage(imgs, () => 0.34).id, '102');
-  assert.equal(MG.pickMapillaryImage(imgs, () => 0.67).id, '106');
-  assert.equal(MG.pickMapillaryImage(imgs, () => 0.999).id, '106');
-  const seen = new Set();
-  for (let k = 0; k < 100; k++) seen.add(MG.pickMapillaryImage(imgs, () => k / 100).id);
-  assert.deepEqual([...seen].sort(), ['101', '102', '106']); // never 103 (0.79), 104 (no score), 105 (flat)
-
-  // The cut sits exactly at 0.8: 0.79 is dropped, 0.8 is kept.
-  assert.equal(MG.pickMapillaryImage(byId('103'), () => 0), null);
-  assert.equal(MG.pickMapillaryImage(byId('102'), () => 0).id, '102');
-  // A panorama with no quality_score is dropped.
-  assert.equal(MG.pickMapillaryImage(byId('104'), () => 0), null);
-  // A flat photo is never picked, however good, and with no panorama left there is no pick.
-  assert.equal(MG.pickMapillaryImage(byId('105'), () => 0), null);
-  assert.equal(MG.pickMapillaryImage([{ id: 'f', pano: false, quality: 1, lat: 1, lon: 2 }], () => 0), null);
-  assert.equal(MG.pickMapillaryImage(imgs.filter((i) => !i.pano || i.quality < 0.8), () => 0), null);
-  // The first tile: its panorama has no quality_score and the rest are flat photos.
-  for (const r of [0, 0.5, 0.999]) assert.equal(MG.pickMapillaryImage(MG.mapillaryImages(tileBytes, 14, 8296, 5636), () => r), null);
-  assert.equal(MG.pickMapillaryImage([]), null);
 });
 
 // ---------- z13 sequence layer + Graph lookup by image id ----------

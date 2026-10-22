@@ -608,33 +608,8 @@
     return null;
   }
 
-  // Mapillary images of tile [x, y] at zoom z: [{ id, pano, quality, lat, lon }], id a decimal
-  // string, quality the tile's quality_score (0..1), or null when it has none.
-  function mapillaryImages(bytes, z, x, y) {
-    const layer = decodeMvtLayer(bytes, 'image');
-    if (!layer) return [];
-    return layer.features.filter((f) => f.points.length && (f.props.id ?? f.id) != null).map((f) => {
-      const [px, py] = f.points[0];
-      const q = f.props.quality_score;
-      return {
-        id: String(f.props.id ?? f.id), pano: f.props.is_pano === true, quality: typeof q === 'number' ? q : null,
-        ...tilePointToLatLon(z, x, y, px, py, layer.extent),
-      };
-    });
-  }
-
   // The lowest Mapillary quality_score a round may use; under it the images are mostly junk.
   const MAPILLARY_MIN_QUALITY = 0.8;
-
-  // A random panorama with quality_score >= MAPILLARY_MIN_QUALITY as a round's place. Flat
-  // photos and images with no score (null, which never compares >=) are never used: null when
-  // no image qualifies.
-  function pickMapillaryImage(images, random = Math.random) {
-    const pool = images.filter((i) => i.pano === true && i.quality >= MAPILLARY_MIN_QUALITY);
-    if (!pool.length) return null;
-    const img = pool[Math.floor(random() * pool.length)];
-    return { src: 'm', id: img.id, lat: img.lat, lon: img.lon, kind: 'mapillary' };
-  }
 
   // Image ids worth a Graph lookup from a z13 tile's `sequence` layer, the only layer it has:
   // one id per panorama sequence whose own quality_score is >= MAPILLARY_MIN_QUALITY, as an exact
@@ -672,8 +647,8 @@
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
     guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
-    parseRoomSeat, reconnectDelay, tileAt, tileNeighbours, tilePointToLatLon, decodeMvtLayer, mapillaryImages,
-    MAPILLARY_MIN_QUALITY, pickMapillaryImage, mapillarySequenceCandidates, mapillaryGraphPlace,
+    parseRoomSeat, reconnectDelay, tileAt, tileNeighbours, tilePointToLatLon, decodeMvtLayer,
+    MAPILLARY_MIN_QUALITY, mapillarySequenceCandidates, mapillaryGraphPlace,
   };
 
   // ---------- Bad images ----------
