@@ -115,10 +115,18 @@ async function tryGoogle(lat, lon, spheres) {
   return googlePanoAt(lat, lon, google.maps.StreetViewSource.OUTDOOR, spheres === 'walk');
 }
 
-// Снимки Mapillary ищем по векторным тайлам z14 (≈ 2,4 × 2,4 км у экватора): поиск Graph API
-// по квадрату больше ~600 м отвечает ошибкой. Null — тайл не скачался.
-const MAPILLARY_Z = 14;
-async function mapillaryTile([x, y]) {
+// Снимки Mapillary ищем по векторным тайлам z13 (≈ 4,9 × 4,9 км у экватора): в них один слой
+// sequence, по записи на серию снимков, с id одного её снимка. Тайл z14 со всеми снимками весит
+// в центре Токио 6 МБ, z13 — 300 КБ. Точное место снимка даёт запрос Graph API по его id (поиск
+// Graph API по квадрату больше ~600 м отвечает ошибкой).
+const MAPILLARY_Z = 13;
+// Качество серии не равно качеству её снимка, поэтому снимок проверяем ещё раз по ответу Graph API,
+// но не больше чем MAPILLARY_LOOKUPS снимков на поиск.
+const MAPILLARY_LOOKUPS = 3;
+const MAPILLARY_KEY_ERROR = 'Mapillary не принял ключ. Проверьте mapillaryToken в config.js.';
+
+// Id снимков годных панорамных серий тайла. Null — тайл не скачался.
+async function mapillaryCandidates([x, y]) {
   const url = `https://tiles.mapillary.com/maps/vtp/mly1_public/2/${MAPILLARY_Z}/${x}/${y}`
     + `?access_token=${encodeURIComponent(CFG.mapillaryToken)}`;
   let res;
@@ -127,27 +135,52 @@ async function mapillaryTile([x, y]) {
   } catch {
     return null;
   }
-  if (res.status === 401 || res.status === 403) {
-    throw new Error('Mapillary не принял ключ. Проверьте mapillaryToken в config.js.');
-  }
+  if (res.status === 401 || res.status === 403) throw new Error(MAPILLARY_KEY_ERROR);
   if (!res.ok) return null;
   try {
-    return MG.mapillaryImages(new Uint8Array(await res.arrayBuffer()), MAPILLARY_Z, x, y);
+    return MG.mapillarySequenceCandidates(new Uint8Array(await res.arrayBuffer()));
   } catch {
     return null;
   }
 }
 
+// Место снимка по id из Graph API. Null — не панорама, качество ниже порога или сеть подвела.
+async function mapillaryPlace(id) {
+  const url = `https://graph.mapillary.com/${encodeURIComponent(id)}?fields=id,is_pano,geometry,quality_score`
+    + `&access_token=${encodeURIComponent(CFG.mapillaryToken)}`;
+  let res;
+  try {
+    res = await fetch(url);
+  } catch {
+    return null;
+  }
+  if (res.status === 401 || res.status === 403) throw new Error(MAPILLARY_KEY_ERROR);
+  if (!res.ok) return null;
+  try {
+    return MG.mapillaryGraphPlace(await res.json());
+  } catch {
+    return null;
+  }
+}
+
+// Первый годный снимок среди не более чем MAPILLARY_LOOKUPS случайных кандидатов.
+async function firstMapillaryPlace(ids) {
+  for (const id of shuffle([...new Set(ids)]).slice(0, MAPILLARY_LOOKUPS)) {
+    const place = await mapillaryPlace(id);
+    if (place) return place;
+  }
+  return null;
+}
+
 async function tryMapillary(lat, lon) {
   const tile = MG.tileAt(lat, lon, MAPILLARY_Z);
-  const images = await mapillaryTile(tile);
-  if (!images) return null;
-  const own = MG.pickMapillaryImage(images);
-  if (own) return own;
-  // В своём тайле нет годной панорамы (пусто, только плоские фото или низкое качество):
-  // смотрим 8 соседних, выходит примерно прежний радиус поиска в ~9 км.
-  const near = await Promise.all(MG.tileNeighbours(...tile, MAPILLARY_Z).map(mapillaryTile));
-  return MG.pickMapillaryImage(near.flatMap((imgs) => imgs || []));
+  const ids = await mapillaryCandidates(tile);
+  if (!ids) return null;
+  if (ids.length) return firstMapillaryPlace(ids);
+  // В своём тайле нет годной панорамной серии (пусто, только плоские фото или низкое качество):
+  // смотрим 8 соседних, выходит квадрат ≈ 15 × 15 км у экватора.
+  const near = await Promise.all(MG.tileNeighbours(...tile, MAPILLARY_Z).map(mapillaryCandidates));
+  return firstMapillaryPlace(near.flatMap((found) => found || []));
 }
 
 async function findAt([lat, lon], sources, spheres) {

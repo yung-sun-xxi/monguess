@@ -44,8 +44,9 @@ authority to merge; CI (`.github/workflows/ci.yml`) runs the same script on Ubun
   `lh3.googleusercontent.com` for tiles); Google's own imagery renders fine. Judge
   photospheres on https://monguess.pages.dev, not locally.
 - Mapillary Graph `/images?bbox` search fails on boxes larger than about 0.006°
-  (HTTP 500 or a 30-40 s wait, measured 2026-10-22), so places are found through z14
-  vector tiles; the Graph API is used only to open one image by id.
+  (HTTP 500 or a 30-40 s wait, measured 2026-10-22), so places are found through the
+  `sequence` layer of z13 vector tiles (one image id per sequence; a z14 tile with every
+  image weighs 6 MB in central Tokyo); the Graph API is used only to look up one image by id.
 - The friends link `#c=` is base64 of the answers (and of the scoring mode, for a classic
   game). Anyone can decode it; that is by design for a friends-only game.
 - A browser smoke test of a worktree needs port 8765 free: a `scripts/play.sh` left running
