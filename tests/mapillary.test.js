@@ -238,6 +238,9 @@ test('mapillaryGraphPlace: a panorama with quality_score >= 0.8 becomes a round 
   assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: undefined })), null);
   assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'LineString', coordinates: [[1, 2], [3, 4]] } })), null);
   assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'Point', coordinates: [2.29] } })), null);
+  // Numbers in the right shape are still not a position unless the geometry says it is a Point.
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { coordinates: [2.29, 48.8] } })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'MultiPoint', coordinates: [2.29, 48.8] } })), null);
   assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'Point', coordinates: ['2.29', '48.8'] } })), null);
   // An id the bad-image list could not hold, an error answer, or nothing at all: no place.
   assert.equal(MG.mapillaryGraphPlace(graphImage({ id: undefined })), null);
