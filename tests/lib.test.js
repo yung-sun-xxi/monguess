@@ -590,3 +590,25 @@ test('globeCells: the real places.json gives a dotted world of about a thousand 
 test('NEAR_PERFECT: solo confetti starts at 4 900 points', () => {
   assert.equal(MG.NEAR_PERFECT, 4900);
 });
+
+test('moonAge: a share of the lunar month, right on real moons within a day', () => {
+  const day = 86400000;
+  // The 2024 total solar eclipse was a new moon (8 April, 18:21 UTC); 23 April 2024, 23:49 UTC a full moon.
+  const newAge = MG.moonAge(Date.UTC(2024, 3, 8, 18, 21));
+  assert.ok(Math.min(newAge, 1 - newAge) < 1 / 29.5, `new moon age ${newAge}`);
+  assert.ok(Math.abs(MG.moonAge(Date.UTC(2024, 3, 23, 23, 49)) - 0.5) < 1 / 29.5);
+  const t = Date.UTC(2026, 9, 23);
+  assert.ok(Math.abs(MG.moonAge(t + 29.530588853 * day) - MG.moonAge(t)) < 1e-6);
+  for (const ms of [0, t, Date.UTC(1990, 0, 1)]) assert.ok(MG.moonAge(ms) >= 0 && MG.moonAge(ms) < 1);
+});
+
+test('moonPath: right half lit while waxing, left while waning, terminator bulging past a quarter', () => {
+  // Waxing crescent: right limb, terminator bulging right (sweep 0).
+  assert.equal(MG.moonPath(0.1, 17, 16), 'M17 1A16 16 0 0 1 17 33A12.94 16 0 0 0 17 1Z');
+  // First quarter: a straight terminator.
+  assert.equal(MG.moonPath(0.25, 17, 16), 'M17 1A16 16 0 0 1 17 33A0 16 0 0 1 17 1Z');
+  // Full: left limb plus a terminator as wide as the disc on the other side.
+  assert.equal(MG.moonPath(0.5, 17, 16), 'M17 1A16 16 0 0 0 17 33A16 16 0 0 0 17 1Z');
+  // Waning crescent: left limb, terminator bulging left (sweep 1).
+  assert.equal(MG.moonPath(0.9, 17, 16), 'M17 1A16 16 0 0 0 17 33A12.94 16 0 0 1 17 1Z');
+});

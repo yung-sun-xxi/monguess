@@ -8,7 +8,8 @@ const {
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
   guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
-  parseRoomSeat, reconnectDelay, NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells, prewarmId,
+  parseRoomSeat, reconnectDelay, NEAR_PERFECT, roundWinners, gameWinners, joinNames, globeCells, prewarmId, moonAge,
+  moonPath,
 } = window.MG;
 // Анимации (барабаны, конфетти, экран победителя, глобус загрузки) живут в fx.js.
 const FX = window.MGFX;
@@ -1358,6 +1359,8 @@ async function playChallenge({ rounds, scoring }) {
 }
 
 async function init() {
+  // Луна на заставке — в сегодняшней фазе, как на настоящем небе.
+  FX.paintMoon($('banner-moon'), moonPath(moonAge(Date.now()), 17, 16));
   fillSourceSelect();
   setupPlayerName();
   const hasLink = location.hash.startsWith('#c=');

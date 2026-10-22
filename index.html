@@ -14,14 +14,39 @@
   <section id="menu" class="screen">
 
     <header class="hero landing-part">
-      <!-- The strip behind the banner: four skies over one day, stars, far ridges, five places
-           (desert, alpine village, city, tropical coast, snowy north) with their lit windows,
-           and the roadside foreground. Each layer slides left at its own speed. -->
+      <!-- The strip behind the banner: four skies over one day, the sun and today's moon, stars,
+           shooting stars, clouds, a plane, birds at dawn, far ridges, five places (desert, alpine
+           village, city, tropical coast, snowy north) with their lit windows, and the roadside
+           foreground. Each layer slides left at its own speed. -->
       <div class="pano" aria-hidden="true">
         <div class="sky sky-sunset"></div>
         <div class="sky sky-night"></div>
         <div class="sky sky-dawn"></div>
+        <div class="sky-body sun-x"><div class="sun-y"></div></div>
+        <div class="sky-body moon-x"><div class="moon-y"><div class="moon-disc" id="banner-moon"></div></div></div>
         <div class="stars"></div>
+        <div class="sky-fx meteors">
+          <div class="meteor" style="top: 14%; left: 62%"></div>
+          <div class="meteor" style="top: 9%; left: 34%"></div>
+          <div class="meteor" style="top: 22%; left: 80%"></div>
+        </div>
+        <div class="sky-fx clouds">
+          <div class="cloud" style="top: 9%"></div>
+          <div class="cloud" style="top: 19%; width: 150px; height: 60px"></div>
+          <div class="cloud" style="top: 5%; width: 240px; height: 96px; opacity: 0.4"></div>
+        </div>
+        <div class="sky-fx planes"><div class="plane"></div></div>
+        <div class="sky-fx birds">
+          <div class="flock">
+            <div class="bird" style="left: 0; top: 30px"><i></i></div>
+            <div class="bird" style="left: 20px; top: 21px"><i></i></div>
+            <div class="bird" style="left: 40px; top: 12px"><i></i></div>
+            <div class="bird" style="left: 22px; top: 39px"><i></i></div>
+            <div class="bird" style="left: 44px; top: 48px"><i></i></div>
+            <div class="bird" style="left: 66px; top: 57px"><i></i></div>
+            <div class="bird" style="left: 60px; top: 3px"><i></i></div>
+          </div>
+        </div>
         <div class="layer far"></div>
         <div class="layer places"></div>
         <div class="layer places lit"></div>
