@@ -157,6 +157,7 @@ h1 { margin: 0; font-size: 2.2rem; }
 #hud { flex-wrap: wrap; }
 #hud-timer { color: #ffd479; font-weight: 600; font-variant-numeric: tabular-nums; }
 #hud-timer.urgent { color: var(--error); }
+#hud-invite { background: rgba(16, 21, 28, 0.85); padding: 6px 12px; border-color: var(--accent); }
 #guess-box.locked #guess-map { filter: grayscale(0.7) brightness(0.75); cursor: not-allowed; }
 
 #result-panel { max-height: calc(100% - 48px); overflow-y: auto; }
