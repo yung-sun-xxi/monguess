@@ -1,4 +1,4 @@
-# Cloudflare Pages config for MonGuess: the Functions in functions/ and their KV binding.
+# Cloudflare Pages config for MonGuess: the Functions in functions/ and their bindings.
 # scripts/deploy.sh assembles the site in a temporary folder and passes that folder to
 # `wrangler pages deploy` explicitly; pages_build_output_dir is here only because wrangler
 # reads this file as a Pages config when the key is present.
@@ -10,3 +10,10 @@ compatibility_date = "2026-06-01"
 [[kv_namespaces]]
 binding = "LOG"
 id = "f92fd3f1a21b4bbfb1f234886c2596a8"
+
+# Live rooms (functions/api/room/[id].js): the Durable Object class Room lives in the
+# separate Worker monguess-rooms (rooms/wrangler.toml), which must be deployed first.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+script_name = "monguess-rooms"
