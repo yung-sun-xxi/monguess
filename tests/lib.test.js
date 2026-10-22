@@ -157,7 +157,10 @@ test('difficultyLevel: 1-3 from a number or the select text; anything else is th
     assert.equal(MG.difficultyLevel(value), 3, JSON.stringify(value));
     assert.equal(MG.difficultyLevel(value, 2), 2, JSON.stringify(value));
   }
+  // The menu passes fallback 2: the select's '3' must still be hard, not the fallback.
   assert.equal(MG.difficultyLevel('1', 2), 1);
+  assert.equal(MG.difficultyLevel('3', 2), 3);
+  assert.equal(MG.difficultyLevel('2', 3), 2);
 });
 
 test('countryPool: easy is tier 1, medium tiers 1-2, hard every code exactly as given', () => {
