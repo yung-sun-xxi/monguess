@@ -207,6 +207,8 @@
       <button id="hud-invite" hidden>Пригласить</button>
       <!-- В своей игре и в комнате: снимок текущего раунда больше не попадётся ни в одной игре. -->
       <button id="hud-bad" title="Скрыть этот снимок из всех игр навсегда">Плохая картинка</button>
+      <!-- В своей игре, по ссылке друга и в комнате: бросить игру и вернуться на главную. -->
+      <button id="hud-end">Закончить игру</button>
     </div>
     <div id="guess-box">
       <div id="guess-map"></div>
@@ -238,6 +240,16 @@
     </div>
     <p id="copied" class="note" hidden></p>
   </section>
+
+  <!-- Подтверждение «Закончить игру». Своё окно, а не window.confirm(): confirm замораживает
+       страницу, и таймеры комнаты встали бы. Вне экранов, чтобы смена экрана его не прятала. -->
+  <dialog id="end-dialog" aria-labelledby="end-text">
+    <p id="end-text">Закончить игру? Результат не сохранится.</p>
+    <div class="end-buttons">
+      <button id="end-yes" class="primary">Да</button>
+      <button id="end-no" autofocus>Нет</button>
+    </div>
+  </dialog>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
