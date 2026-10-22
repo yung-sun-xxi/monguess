@@ -20,13 +20,17 @@
 // A playerId is chosen by the browser (1-64 characters of [A-Za-z0-9_-]) and kept by it, so
 // a page that reconnects with the same playerId is the same player, never a second one.
 // The first message on a socket must be create or join; the socket then speaks for that
-// playerId. Closing the socket is leaving.
+// playerId. Closing the socket is leaving. A player who left is shown as not connected at
+// once, but a round keeps waiting for them for GRACE_MS (10 s): a reload or a short network
+// drop comes back with join inside that time and still plays the round. After the grace the
+// round no longer waits for them; a timer round's countdown governs either way.
 //
 // Browser -> room
 //   { type: 'create', playerId, name, settings, rounds }
 //       Makes the room; only valid on a room that does not exist yet. The creator joins.
 //       settings: { mode: 'none' }                   a round ends when every connected
-//                                                     player has guessed
+//                                                     player (and everyone who left less
+//                                                     than GRACE_MS ago) has guessed
 //              or { mode: 'timer', timerSec: 5-600 } the first guess starts timerSec
 //                                                     seconds for the rest
 //       rounds: 1-20 of { src: 'g'|'m', id, lat, lon, cc, forgiveKm }, found by the
@@ -66,6 +70,7 @@
 const MG = require('../lib.js');
 
 const RESULTS_MS = 5000;
+const GRACE_MS = 10000;
 const IDLE_MS = 3 * 60 * 60 * 1000;
 const MAX_ROUNDS = 20;
 const TIMER_MIN_SEC = 5;
@@ -162,12 +167,16 @@ function endRound(state, now, out) {
   if (last) out.push({ to: 'all', msg: { type: 'final', table: table(state) } });
 }
 
-// A round ends when every connected player has guessed. Nobody connected ends nothing:
-// an empty room waits for its players (or for idle expiry).
+// When a player who left stops being waited for. leftAt is absent in rooms stored before it.
+const graceEnd = (p) => (typeof p.leftAt === 'number' ? p.leftAt + GRACE_MS : null);
+
+// A round ends when every player it waits for has guessed: the connected ones and those who
+// left less than GRACE_MS ago. Nobody to wait for ends nothing: an empty room waits for its
+// players (or for idle expiry).
 function maybeEndRound(state, now, out) {
   if (state.phase !== 'round') return;
-  const connected = Object.entries(state.players).filter(([, p]) => p.connected);
-  if (connected.length && connected.every(([id]) => state.guesses[id])) endRound(state, now, out);
+  const waited = Object.entries(state.players).filter(([, p]) => p.connected || (graceEnd(p) !== null && now < graceEnd(p)));
+  if (waited.length && waited.every(([id]) => state.guesses[id])) endRound(state, now, out);
 }
 
 function create(event, now) {
@@ -235,14 +244,21 @@ function guess(state, event, now, out) {
 
 function alarm(state, now, out) {
   if (state.phase === 'round' && state.endsAt !== null && now >= state.endsAt) endRound(state, now, out);
+  else if (state.phase === 'round') maybeEndRound(state, now, out); // a grace may have run out
   else if (state.phase === 'results' && now >= state.nextAt) startRound(state, state.index + 1, out);
   if (now >= state.lastActivity + IDLE_MS) return null;
   return state;
 }
 
-function nextAlarm(state) {
+function nextAlarm(state, now) {
   let at = state.lastActivity + IDLE_MS;
   if (state.phase === 'round' && state.endsAt !== null) at = Math.min(at, state.endsAt);
+  if (state.phase === 'round') {
+    for (const p of Object.values(state.players)) {
+      const end = graceEnd(p);
+      if (!p.connected && end !== null && end > now) at = Math.min(at, end);
+    }
+  }
   if (state.phase === 'results') at = Math.min(at, state.nextAt);
   return at;
 }
@@ -256,26 +272,27 @@ function step(prev, event, now) {
   if (type === 'alarm') {
     if (!prev) return { state: null, out, alarmAt: null };
     const state = alarm(structuredClone(prev), now, out);
-    return { state, out, alarmAt: state ? nextAlarm(state) : null };
+    return { state, out, alarmAt: state ? nextAlarm(state, now) : null };
   }
   if (type === 'leave') {
-    if (!prev || !prev.players[id]) return { state: prev, out, alarmAt: prev ? nextAlarm(prev) : null };
+    if (!prev || !prev.players[id]) return { state: prev, out, alarmAt: prev ? nextAlarm(prev, now) : null };
     const state = structuredClone(prev);
     state.players[id].connected = false;
+    state.players[id].leftAt = now;
     out.push({ to: 'all', msg: { type: 'players', players: playersList(state) } });
     maybeEndRound(state, now, out);
-    return { state, out, alarmAt: nextAlarm(state) };
+    return { state, out, alarmAt: nextAlarm(state, now) };
   }
   if (typeof id !== 'string' || !PLAYER_ID.test(id)) {
-    return { state: prev, out: [error(id, 'bad-player', 'Bad playerId.')], alarmAt: prev ? nextAlarm(prev) : null };
+    return { state: prev, out: [error(id, 'bad-player', 'Bad playerId.')], alarmAt: prev ? nextAlarm(prev, now) : null };
   }
   if (!CLIENT_EVENTS.includes(type)) {
-    return { state: prev, out: [error(id, 'bad-message', 'Unknown message type.')], alarmAt: prev ? nextAlarm(prev) : null };
+    return { state: prev, out: [error(id, 'bad-message', 'Unknown message type.')], alarmAt: prev ? nextAlarm(prev, now) : null };
   }
   if (type === 'create') {
-    if (prev) return { state: prev, out: [error(id, 'room-exists', 'This room already exists.')], alarmAt: nextAlarm(prev) };
+    if (prev) return { state: prev, out: [error(id, 'room-exists', 'This room already exists.')], alarmAt: nextAlarm(prev, now) };
     const made = create(event, now);
-    return { ...made, alarmAt: made.state ? nextAlarm(made.state) : null };
+    return { ...made, alarmAt: made.state ? nextAlarm(made.state, now) : null };
   }
   if (!prev) return { state: null, out: [error(id, 'no-room', 'This room does not exist.')], alarmAt: null };
 
@@ -287,7 +304,7 @@ function step(prev, event, now) {
     if (state.phase !== 'lobby') out.push(error(id, 'started', 'The game has already started.'));
     else startRound(state, 0, out);
   } else if (type === 'guess') guess(state, event, now, out);
-  return { state, out, alarmAt: nextAlarm(state) };
+  return { state, out, alarmAt: nextAlarm(state, now) };
 }
 
-module.exports = { step, RESULTS_MS, IDLE_MS, MAX_ROUNDS };
+module.exports = { step, RESULTS_MS, IDLE_MS, MAX_ROUNDS, GRACE_MS };
