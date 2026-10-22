@@ -716,6 +716,7 @@ async function showRoomRound({ index, place, endsAt, guessed }) {
   $('hud-round').textContent = `Раунд ${index + 1} из ${room.roundsTotal}`;
   $('hud-score').textContent = `Очки: ${myRoomTotal().toLocaleString('ru')}`;
   $('hud-room').hidden = false;
+  $('hud-invite').hidden = false;
   resetGuessMap();
   lockRoomGuess(guessed);
   renderRoomStatus();
@@ -745,6 +746,27 @@ function roomGuess() {
   const ll = guessMarker.getLatLng();
   if (roomSend({ type: 'guess', round: room.index, lat: ll.lat, lon: ll.lng })) lockRoomGuess(true);
   else roomLost(room.retry || (room.ws && !room.joined) ? ROOM_RECONNECTING : ROOM_LOST);
+}
+
+// Позвать ещё игроков посреди игры, если ссылку из лобби уже не найти. На телефоне —
+// системное «Поделиться», на компьютере ссылка уходит в буфер обмена, а кнопка коротко
+// подтверждает это. Без доступа к буферу ссылка показывается, чтобы скопировать её руками.
+async function inviteToRoom() {
+  const url = roomLink(pageBase(), room.id);
+  const button = $('hud-invite');
+  if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+    try { await navigator.share({ title: 'MonGuess', url }); } catch { /* меню закрыли */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    window.prompt('Ссылка на комнату:', url);
+    return;
+  }
+  button.textContent = 'Ссылка скопирована';
+  clearTimeout(button.reset);
+  button.reset = setTimeout(() => { button.textContent = 'Пригласить'; }, 2000);
 }
 
 function renderRoomStatus() {
@@ -1065,6 +1087,7 @@ async function init() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && closable()) closeSetup();
   });
+  $('hud-invite').onclick = inviteToRoom;
   $('lobby-copy').onclick = () => copy($('lobby-link').value, 'Ссылка скопирована — отправьте её друзьям.', 'lobby-copied');
   $('lobby-start').onclick = () => {
     $('lobby-error').textContent = '';
