@@ -227,3 +227,85 @@ test('pickMapillaryImage: only a panorama with quality_score >= 0.8, spread even
   for (const r of [0, 0.5, 0.999]) assert.equal(MG.pickMapillaryImage(MG.mapillaryImages(tileBytes, 14, 8296, 5636), () => r), null);
   assert.equal(MG.pickMapillaryImage([]), null);
 });
+
+// ---------- z13 sequence layer + Graph lookup by image id ----------
+
+// A z13 tile carries only a `sequence` layer: one feature per sequence, with the id of one of
+// its images. Every feature here is a panorama with quality_score >= 0.8 unless its note says
+// otherwise. keys: 0 id, 1 is_pano, 2 quality_score, 3 image_id
+// values: 0 true, 1 false, 2 0.95, 3 0.8, 4 0.79, 5 1, 6 'seq', 7 PANO_ID (int64, decodes to a
+//         Number), 8 BIG_ID (int64, decodes to a string), 9 SINT_ID (sint64), 10..14 uint 201..205,
+//         15 '0.9' (a string, not a number)
+const sequenceTile = Uint8Array.from(layer({
+  name: 'sequence',
+  extent: 4096,
+  keys: ['id', 'is_pano', 'quality_score', 'image_id'],
+  values: [value.bool(true), value.bool(false), value.double(0.95), value.double(0.8), value.double(0.79), value.double(1),
+    value.string('seq'), value.int(PANO_ID), value.int(BIG_ID), value.sint(BigInt(SINT_ID)),
+    ...[201, 202, 203, 204, 205].map((n) => value.uint(n)), value.string('0.9')],
+  features: [
+    { id: 1, tags: [0, 6, 1, 0, 2, 2, 3, 7], geometry: points([[10, 10]]) }, // PANO_ID, 0.95
+    { id: 2, tags: [0, 6, 1, 0, 2, 3, 3, 8], geometry: points([[20, 20]]) }, // BIG_ID, 0.8 exactly
+    { id: 3, tags: [0, 6, 1, 0, 2, 5, 3, 9], geometry: points([[30, 30]]) }, // SINT_ID, 1
+    { id: 4, tags: [0, 6, 1, 0, 2, 4, 3, 10], geometry: points([[40, 40]]) }, // 201: 0.79, dropped
+    { id: 5, tags: [0, 6, 1, 1, 2, 2, 3, 11], geometry: points([[50, 50]]) }, // 202: flat, dropped
+    { id: 6, tags: [0, 6, 1, 0, 3, 12], geometry: points([[60, 60]]) }, // 203: no quality_score, dropped
+    { id: 7, tags: [0, 6, 1, 0, 2, 15, 3, 13], geometry: points([[70, 70]]) }, // 204: quality is a string, dropped
+    { id: 8, tags: [0, 6, 1, 0, 2, 2], geometry: points([[80, 80]]) }, // no image_id, dropped
+    { id: 9, tags: [0, 6, 2, 2, 3, 14], geometry: points([[90, 90]]) }, // 205: no is_pano, dropped
+  ],
+}));
+
+test('mapillarySequenceCandidates: image ids of panorama sequences with quality_score >= 0.8, as exact decimal strings', () => {
+  assert.deepEqual(MG.mapillarySequenceCandidates(sequenceTile), [PANO_ID, BIG_ID, SINT_ID]);
+  // The decoder hands PANO_ID back as a Number and BIG_ID as a string; both come out as strings.
+  const decoded = MG.decodeMvtLayer(sequenceTile, 'sequence').features;
+  assert.equal(typeof decoded[0].props.image_id, 'number');
+  assert.equal(typeof decoded[1].props.image_id, 'string');
+  // No sequence layer (a z14 tile has `image`), an empty layer, or no bytes: no candidates.
+  assert.deepEqual(MG.mapillarySequenceCandidates(tileBytes.slice(layer({
+    name: 'sequence', keys: ['id'], values: [value.string('seq')],
+    features: [{ tags: [0, 0], geometry: points([[1, 1]]) }],
+  }).length)), []);
+  assert.deepEqual(MG.mapillarySequenceCandidates(Uint8Array.from(layer({ name: 'sequence', keys: [], values: [], features: [] }))), []);
+  assert.deepEqual(MG.mapillarySequenceCandidates(new Uint8Array(0)), []);
+});
+
+// A Graph answer for one image, as https://graph.mapillary.com/{id}?fields=id,is_pano,geometry,quality_score gives it.
+const graphImage = (over = {}) => ({
+  id: '989706182335379', is_pano: true, geometry: { type: 'Point', coordinates: [2.2953544, 48.8433791] }, quality_score: 0.862,
+  ...over,
+});
+
+test('mapillaryGraphPlace: a panorama with quality_score >= 0.8 becomes a round place at its Graph geometry', () => {
+  // coordinates are [lon, lat]; the place takes them exactly, the right way round.
+  assert.deepEqual(MG.mapillaryGraphPlace(graphImage()),
+    { src: 'm', id: '989706182335379', lat: 48.8433791, lon: 2.2953544, kind: 'mapillary' });
+  assert.deepEqual(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'Point', coordinates: [-4.123, 40.5] } })),
+    { src: 'm', id: '989706182335379', lat: 40.5, lon: -4.123, kind: 'mapillary' });
+  // The cut sits exactly at 0.8, as for the sequence.
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ quality_score: 0.8 })).id, '989706182335379');
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ quality_score: 1 })).id, '989706182335379');
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ quality_score: 0.799 })), null);
+  // The image's own score decides, not the sequence's: seen live, sequence 0.86, image 0.809 / 0.787.
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ quality_score: 0.787 })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ quality_score: undefined })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ quality_score: '0.9' })), null);
+  // A flat photo, or an answer that does not say it is a panorama, is never a place.
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ is_pano: false })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ is_pano: undefined })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ is_pano: 'true' })), null);
+  // No usable Point geometry: no place.
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: undefined })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'LineString', coordinates: [[1, 2], [3, 4]] } })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'Point', coordinates: [2.29] } })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ geometry: { type: 'Point', coordinates: ['2.29', '48.8'] } })), null);
+  // An id the bad-image list could not hold, an error answer, or nothing at all: no place.
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ id: undefined })), null);
+  assert.equal(MG.mapillaryGraphPlace(graphImage({ id: 'abc' })), null);
+  assert.equal(MG.mapillaryGraphPlace({ error: { message: 'Unsupported get request', code: 100 } }), null);
+  assert.equal(MG.mapillaryGraphPlace(null), null);
+  assert.equal(MG.mapillaryGraphPlace(undefined), null);
+  // The place passes the bad-image key rule.
+  assert.equal(MG.badImageKey(MG.mapillaryGraphPlace(graphImage())), 'm:989706182335379');
+});
