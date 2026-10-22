@@ -90,6 +90,7 @@ h1 { margin: 0; font-size: 2.2rem; }
   display: flex; gap: 12px;
 }
 #hud span { background: rgba(16, 21, 28, 0.85); padding: 6px 12px; border-radius: 8px; }
+#hud-bad { background: rgba(16, 21, 28, 0.85); padding: 6px 12px; }
 
 #guess-box {
   position: absolute; right: 16px; bottom: 16px; z-index: 10;

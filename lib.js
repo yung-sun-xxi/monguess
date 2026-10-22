@@ -581,6 +581,55 @@
     parseRoomSeat, reconnectDelay, tileAt, tileNeighbours, tilePointToLatLon, decodeMvtLayer, mapillaryImages,
     pickMapillaryImage,
   };
+
+  // ---------- Bad images ----------
+  // Any player can hide the current round's image for good ("Плохая картинка"): the game posts
+  // { src, id } to /api/bad, functions/api/bad.js keeps every hidden image in one KV value,
+  // a JSON list of "src:id" keys, and the place search skips whatever is on it.
+
+  const BAD_MAX = 5000;
+  // Google: a 22-character pano id, or a user photosphere's longer one (it may end in '.').
+  // Mapillary: a decimal image id.
+  const BAD_ID = { g: /^[A-Za-z0-9_.-]{1,128}$/, m: /^[0-9]{1,20}$/ };
+
+  // "src:id" for a valid { src, id } (a round or a found place will do), null for anything else.
+  function badImageKey(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const { src, id } = entry;
+    if (src !== 'g' && src !== 'm') return null;
+    if (typeof id !== 'string' || !BAD_ID[src].test(id)) return null;
+    return `${src}:${id}`;
+  }
+
+  // The stored list (parsed JSON) as valid keys, each once, in order; [] for anything not a list.
+  function parseBadList(value) {
+    if (!Array.isArray(value)) return [];
+    const keys = new Set();
+    for (const v of value) {
+      if (typeof v !== 'string') continue;
+      const at = v.indexOf(':');
+      const key = badImageKey({ src: v.slice(0, at), id: v.slice(at + 1) });
+      if (at > 0 && key === v) keys.add(key);
+    }
+    return [...keys];
+  }
+
+  // true when a found place is on the set of bad keys.
+  function isBadImage(found, bad) {
+    const key = badImageKey(found);
+    return key !== null && bad.has(key);
+  }
+
+  // The list with key added at the end; the same list when the key is already on it;
+  // null when the list is full. The list passed in is never changed.
+  function addBadImage(list, key, max = BAD_MAX) {
+    if (list.includes(key)) return list;
+    if (list.length >= max) return null;
+    return [...list, key];
+  }
+
+  Object.assign(api, { BAD_MAX, badImageKey, parseBadList, isBadImage, addBadImage });
+
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;
 })();

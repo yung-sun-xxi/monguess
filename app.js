@@ -151,9 +151,47 @@ async function tryMapillary(lat, lon) {
 async function findAt([lat, lon], sources, spheres) {
   for (const s of sources) {
     const found = s === 'g' ? await tryGoogle(lat, lon, spheres) : await tryMapillary(lat, lon);
-    if (found) return found;
+    // Снимок, помеченный игроками как плохой, не годится: ищем дальше, как если бы его не было.
+    if (found && !MG.isBadImage(found, badImages)) return found;
   }
   return null;
+}
+
+// ---------- Плохие картинки ----------
+
+// Снимки, которые игроки пометили кнопкой «Плохая картинка» (/api/bad, functions/api/bad.js),
+// ключами "src:id": findAt их пропускает. Список грузится перед сборкой каждой игры. Не
+// загрузился (сеть, лимит KV, локально у scripts/play.sh нет /api/bad) — игра собирается без него.
+const badImages = new Set();
+const BAD_LOAD_MS = 3000;
+
+async function loadBadImages() {
+  try {
+    const res = await fetch('/api/bad', { signal: AbortSignal.timeout(BAD_LOAD_MS) });
+    if (!res.ok) return;
+    for (const key of MG.parseBadList(await res.json())) badImages.add(key);
+  } catch { /* без списка игра идёт как раньше */ }
+}
+
+// Кнопка в HUD: снимок текущего раунда (своей игры или комнаты) уходит в /api/bad и больше не
+// попадётся ни в одной игре. Одно нажатие на раунд. Ответа сервера не ждём: кнопка сразу
+// пишет «Отправлено», а ошибка отправки, как и у лога, молча проглатывается.
+function reportBad() {
+  const place = room.phase === 'round' ? room.place : state.rounds[state.index];
+  const key = MG.badImageKey(place);
+  if (!key) return;
+  badImages.add(key); // и в этой вкладке он больше не попадётся, не дожидаясь списка с сервера
+  setBadButton(true);
+  fetch('/api/bad', {
+    method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ src: place.src, id: place.id }),
+  }).catch(() => {});
+}
+
+// sent — в этом раунде уже нажата; в начале каждого раунда кнопка снова доступна.
+function setBadButton(sent) {
+  $('hud-bad').textContent = sent ? 'Отправлено' : 'Плохая картинка';
+  $('hud-bad').disabled = sent;
 }
 
 // Страна по координатам — снимок у границы может оказаться у соседей.
@@ -348,6 +386,7 @@ async function startRound() {
   show('game');
   $('hud-round').textContent = `Раунд ${state.index + 1} / ${state.rounds.length}`;
   $('hud-score').textContent = `Очки: ${total().toLocaleString('ru')}`;
+  setBadButton(false);
   try {
     await showPanorama(round);
   } catch (e) {
@@ -768,6 +807,7 @@ async function showRoomRound({ index, place, endsAt, guessed }) {
   $('hud-score').textContent = `Очки: ${myRoomTotal().toLocaleString('ru')}`;
   $('hud-room').hidden = false;
   $('hud-invite').hidden = false;
+  setBadButton(false);
   resetGuessMap();
   lockRoomGuess(guessed);
   renderRoomStatus();
@@ -1028,6 +1068,7 @@ async function findPlaces({ sources, spheres, count }) {
   show('loading');
   $('loading-text').textContent = 'Загрузка…';
   if (sources.includes('g') && !(await loadGoogle())) throw new Error('Не удалось загрузить Google Maps.');
+  await loadBadImages();
   const built = Date.now();
   const rounds = await generateRounds(count, sources, spheres, (n, of) => {
     $('loading-text').textContent = `Ищу место ${n} из ${of}…`;
@@ -1135,6 +1176,7 @@ async function init() {
     if (e.key === 'Escape' && closable()) closeSetup();
   });
   $('hud-invite').onclick = inviteToRoom;
+  $('hud-bad').onclick = reportBad;
   $('lobby-copy').onclick = () => copy($('lobby-link').value, 'Ссылка скопирована — отправьте её друзьям.', 'lobby-copied');
   $('lobby-start').onclick = () => {
     $('lobby-error').textContent = '';
