@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 // Smoke test of live rooms: node scripts/room-smoke.js <base-url>
 // e.g. http://localhost:8788 (wrangler pages dev) or https://monguess.pages.dev.
-// Opens two sockets to room A and one to room B, sends from A1, and checks that A2 gets the
-// message while A1 (the sender) and B1 do not. Exit 0 on pass, 1 on any failure or timeout.
-// Needs Node 22+ for the global WebSocket.
+// Checks that a bad room id gets HTTP 400 and that a room nobody created refuses a join,
+// then plays a 2-round no-timer game with two simulated players in a fresh room: Ann
+// creates it, Bob joins and starts (any player may), both guess each round, round 2 starts
+// by itself after the results, and the final table must equal lib.js scoring of the same
+// guesses. Exit 0 on pass, 1 on any failure or timeout. Needs Node 22+ for the global
+// WebSocket. Every run uses fresh random room ids; an unused room expires on its own.
+'use strict';
+const MG = require('../lib.js');
+const places = require('../data/places.json');
 
 const base = process.argv[2];
 if (!base) {
   console.error('usage: node scripts/room-smoke.js <base-url>');
   process.exit(1);
 }
-const DEADLINE_MS = 15000;
-const QUIET_MS = 1500;
+const DEADLINE_MS = 30000;
+const WAIT_MS = 10000;
 
 const rand = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 const run = rand();
@@ -26,44 +32,103 @@ const fail = (why) => {
 };
 setTimeout(() => fail(`no verdict within ${DEADLINE_MS} ms`), DEADLINE_MS).unref();
 
+// The rounds, carrying forgiveKm exactly as the creating browser computes it.
+const ROUNDS = [
+  { src: 'g', id: `smoke-${run}-1`, lat: 41.3874, lon: 2.1686, cc: 'ES' },
+  { src: 'g', id: `smoke-${run}-2`, lat: -33.8688, lon: 151.2093, cc: 'AU' },
+].map((r) => ({ ...r, forgiveKm: MG.forgivenessKm(places[r.cc]) }));
+const GUESSES = {
+  ann: [{ lat: 40.4168, lon: -3.7038 }, { lat: -37.8136, lon: 144.9631 }],
+  bob: [{ lat: 48.8566, lon: 2.3522 }, { lat: -36.8485, lon: 174.7633 }],
+};
+
 function open(name, room) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl(room));
+    ws.name = name;
     ws.received = [];
+    ws.cursor = 0;
     ws.addEventListener('message', (e) => {
-      ws.received.push(String(e.data));
-      log(`${name} received: ${e.data}`);
+      const msg = JSON.parse(String(e.data));
+      ws.received.push(msg);
+      log(`${name} <- ${msg.type}${msg.type === 'error' ? ` ${msg.code}` : ''}${'index' in msg ? ` #${msg.index}` : ''}`);
     });
-    ws.addEventListener('open', () => {
-      log(`${name} open: ${wsUrl(room)}`);
-      resolve(ws);
-    });
+    ws.addEventListener('open', () => resolve(ws));
     ws.addEventListener('error', () => reject(new Error(`${name} could not connect to ${wsUrl(room)}`)));
   });
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function send(ws, msg) {
+  ws.send(JSON.stringify(msg));
+  log(`${ws.name} -> ${msg.type}`);
+}
+
+// The next message of this type after the ones already taken from this socket.
+async function next(ws, type) {
+  for (let waited = 0; waited < WAIT_MS; waited += 25) {
+    const i = ws.received.findIndex((m, k) => k >= ws.cursor && m.type === type);
+    if (i >= 0) {
+      ws.cursor = i + 1;
+      return ws.received[i];
+    }
+    await sleep(25);
+  }
+  return fail(`${ws.name} got no '${type}' within ${WAIT_MS} ms; got ${JSON.stringify(ws.received.map((m) => m.type))}`);
+}
+
 async function main() {
   const bad = await fetch(`${base.replace(/\/$/, '')}/api/room/Bad-Id`);
   log(`bad id -> HTTP ${bad.status}`);
   if (bad.status !== 400) fail(`expected HTTP 400 for a bad room id, got ${bad.status}`);
 
-  const [a1, a2, b1] = await Promise.all([open('A1', roomA), open('A2', roomA), open('B1', roomB)]);
-  const text = `hello from A1 ${run}`;
-  a1.send(text);
-  log(`A1 sent: ${text}`);
+  const stray = await open('Stray', roomB);
+  send(stray, { type: 'join', playerId: `stray${run}`, name: 'Stray' });
+  const refused = await next(stray, 'error');
+  if (refused.code !== 'no-room') fail(`a join to a room nobody created got ${JSON.stringify(refused)}`);
+  stray.close(1000, 'done');
 
-  for (let waited = 0; !a2.received.length && waited < 5000; waited += 50) await sleep(50);
-  await sleep(QUIET_MS);
+  const ann = await open('Ann', roomA);
+  const bob = await open('Bob', roomA);
+  send(ann, { type: 'create', playerId: `ann${run}`, name: 'Ann', settings: { mode: 'none' }, rounds: ROUNDS });
+  await next(ann, 'state');
+  send(bob, { type: 'join', playerId: `bob${run}`, name: 'Bob' });
+  const lobby = await next(bob, 'state');
+  if (lobby.phase !== 'lobby' || lobby.players.length !== 2) fail(`Bob's lobby: ${JSON.stringify(lobby)}`);
+  send(bob, { type: 'start' });
 
-  if (a2.received.length !== 1 || a2.received[0] !== text) {
-    fail(`A2 expected exactly [${JSON.stringify(text)}], got ${JSON.stringify(a2.received)}`);
+  const expected = { Ann: [], Bob: [] };
+  let resultsAt = 0;
+  for (let i = 0; i < ROUNDS.length; i++) {
+    const [ra, rb] = await Promise.all([next(ann, 'round'), next(bob, 'round')]);
+    if (ra.index !== i || rb.index !== i) fail(`expected round ${i}, got ${ra.index} and ${rb.index}`);
+    if ('lat' in ra.place) fail(`round ${i} leaked the answer: ${JSON.stringify(ra.place)}`);
+    if (i > 0) log(`round ${i + 1} started ${Date.now() - resultsAt} ms after the results`);
+    for (const [ws, who] of [[ann, 'ann'], [bob, 'bob']]) {
+      const g = GUESSES[who][i];
+      send(ws, { type: 'guess', round: i, lat: g.lat, lon: g.lon });
+      const name = who === 'ann' ? 'Ann' : 'Bob';
+      expected[name].push(MG.scoreFor(MG.distanceKm(ROUNDS[i], g), ROUNDS[i].forgiveKm));
+    }
+    const [res] = await Promise.all([next(ann, 'results'), next(bob, 'results')]);
+    resultsAt = Date.now();
+    for (const g of res.guesses) log(`  round ${i + 1}: ${g.name} ${Math.round(g.km)} km -> ${g.points}`);
   }
-  if (a1.received.length) fail(`A1 got its own message back: ${JSON.stringify(a1.received)}`);
-  if (b1.received.length) fail(`B1 in another room got: ${JSON.stringify(b1.received)}`);
-  for (const ws of [a1, a2, b1]) ws.close(1000, 'done');
-  log('PASS: A2 got the message; A1 and B1 got nothing');
+
+  const [final] = await Promise.all([next(ann, 'final'), next(bob, 'final')]);
+  log('final table:');
+  for (const row of final.table) log(`  ${row.name}: ${row.points.join(' + ')} = ${row.total}`);
+  for (const name of ['Ann', 'Bob']) {
+    const row = final.table.find((r) => r.name === name);
+    const want = expected[name];
+    const total = want.reduce((s, x) => s + x, 0);
+    if (!row || JSON.stringify(row.points) !== JSON.stringify(want) || row.total !== total) {
+      fail(`${name}: expected ${JSON.stringify(want)} = ${total}, got ${JSON.stringify(row)}`);
+    }
+  }
+  for (const ws of [ann, bob]) ws.close(1000, 'done');
+  log('PASS: two players, two rounds, auto-advance, final table equals lib.js scoring');
   process.exit(0);
 }
 
