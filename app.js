@@ -497,6 +497,7 @@ function showFinal() {
   // вылетают в строку.
   const sum = document.createElement('span');
   sum.className = 'reels';
+  sum.setAttribute('aria-hidden', 'true');
   $('final-total').replaceChildren(sum, ` из ${max.toLocaleString('ru')}`);
   $('final-total').setAttribute('aria-label', `${total().toLocaleString('ru')} из ${max.toLocaleString('ru')}`);
   const chips = state.guesses.map((g) => Object.assign(document.createElement('span'), {

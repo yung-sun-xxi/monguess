@@ -1,7 +1,8 @@
 # MonGuess
 
 A static GeoGuessr-style web game covering every country: `index.html`, `style.css`,
-`lib.js` (pure functions), `app.js` (DOM and network), `data/places.json`. No build step.
+`lib.js` (pure functions), `fx.js` (animations: reels, confetti, winner screen,
+loading globe), `app.js` (DOM and network), `data/places.json`. No build step.
 The process, branch rules and commit format come from `~/PersonalProjects/CLAUDE.md`;
 this file holds only what is true of this repository.
 
