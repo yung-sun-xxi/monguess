@@ -251,3 +251,23 @@ test('mapillaryGraphPlace: a panorama with quality_score >= 0.8 becomes a round 
   // The place passes the bad-image key rule.
   assert.equal(MG.badImageKey(MG.mapillaryGraphPlace(graphImage())), 'm:989706182335379');
 });
+
+// Rounds of a game as play() gets them: Google and Mapillary places in any order.
+const gRound = (id) => ({ src: 'g', id, lat: 0, lon: 0, cc: 'FR' });
+const mRound = (id) => ({ src: 'm', id, lat: 0, lon: 0, cc: 'FR' });
+
+test('prewarmId: the next round\'s id when it is Mapillary, else null', () => {
+  // The next round is Mapillary: its id, whatever the current round is.
+  assert.equal(MG.prewarmId([mRound('11'), mRound('22')], 0), '22');
+  assert.equal(MG.prewarmId([gRound('aa'), mRound('22')], 0), '22');
+  // The next round is Google: nothing to prewarm.
+  assert.equal(MG.prewarmId([mRound('11'), gRound('bb')], 0), null);
+  // The last round has no next one.
+  assert.equal(MG.prewarmId([mRound('11'), mRound('22')], 1), null);
+  assert.equal(MG.prewarmId([mRound('11')], 0), null);
+  // Mixed: each index looks only at the round right after it.
+  const mixed = [gRound('aa'), mRound('22'), mRound('33'), gRound('dd'), mRound('55')];
+  assert.deepEqual(mixed.map((_, i) => MG.prewarmId(mixed, i)), ['22', '33', null, '55', null]);
+  // No rounds (the game was left): nothing.
+  assert.equal(MG.prewarmId([], 0), null);
+});
