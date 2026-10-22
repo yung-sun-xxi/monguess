@@ -179,3 +179,62 @@ test('roomFinalRows: place, name, points per round, total; ties share a place', 
   ]);
   assert.deepEqual(MG.roomFinalRows([], 'a'), []);
 });
+
+test('roomSeatKey: one localStorage key per room', () => {
+  assert.equal(MG.roomSeatKey('k3x9a0bq7z'), 'mg-room:k3x9a0bq7z');
+  assert.notEqual(MG.roomSeatKey('a'), MG.roomSeatKey('b'));
+});
+
+test('roomSeatText and parseRoomSeat: a seat survives the round trip, the name cleaned', () => {
+  const text = MG.roomSeatText({ playerId: 'ab12_-XY', name: '  Боб  ', extra: 1 });
+  assert.deepEqual(JSON.parse(text), { playerId: 'ab12_-XY', name: 'Боб' });
+  assert.deepEqual(MG.parseRoomSeat(text), { playerId: 'ab12_-XY', name: 'Боб' });
+  assert.deepEqual(MG.parseRoomSeat(JSON.stringify({ playerId: 'p'.repeat(64), name: 'A', more: true })),
+    { playerId: 'p'.repeat(64), name: 'A' });
+});
+
+test('parseRoomSeat: null for anything the room would refuse or that is not a seat', () => {
+  const bad = [
+    null, undefined, '', 'not json', '42', 'null', '[]', '"seat"',
+    JSON.stringify({ name: 'Ann' }),
+    JSON.stringify({ playerId: 'p1' }),
+    JSON.stringify({ playerId: 'p1', name: '   ' }),
+    JSON.stringify({ playerId: 'p1', name: 42 }),
+    JSON.stringify({ playerId: '', name: 'Ann' }),
+    JSON.stringify({ playerId: 'p 1', name: 'Ann' }),
+    JSON.stringify({ playerId: 'p'.repeat(65), name: 'Ann' }),
+    JSON.stringify({ playerId: 7, name: 'Ann' }),
+  ];
+  for (const text of bad) assert.equal(MG.parseRoomSeat(text), null, String(text));
+});
+
+test('parseRoomSeat: a stored seat joins back into the same place of a running room', () => {
+  const rounds = ROUNDS.map((r) => ({ src: r.src, id: r.id, lat: r.lat, lon: r.lon, cc: r.cc, forgiveKm: 0 }));
+  let s = R.step(null, { type: 'create', playerId: 'ann', name: 'Ann', settings: { mode: 'none' }, rounds }, 0).state;
+  s = R.step(s, { type: 'join', playerId: 'bob0bob0bob0bob0', name: 'Bob' }, 1).state;
+  s = R.step(s, { type: 'start', playerId: 'ann' }, 2).state;
+  s = R.step(s, { type: 'guess', playerId: 'bob0bob0bob0bob0', round: 0, lat: 41, lon: 2 }, 3).state;
+  s = R.step(s, { type: 'leave', playerId: 'bob0bob0bob0bob0' }, 4).state;
+  const seat = MG.parseRoomSeat(MG.roomSeatText({ playerId: 'bob0bob0bob0bob0', name: 'Bob' }));
+  const back = R.step(s, { type: 'join', ...seat }, 5);
+  const snap = back.out.find((o) => o.msg.type === 'state').msg;
+  assert.equal(snap.players.length, 2);
+  assert.deepEqual(snap.players.find((p) => p.playerId === seat.playerId), {
+    playerId: 'bob0bob0bob0bob0', name: 'Bob', connected: true, guessed: true,
+  });
+});
+
+test('reconnectDelay: 1, 2, 4, 8 s, then every 10 s, giving up after about 2 minutes', () => {
+  const delays = [];
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const d = MG.reconnectDelay(attempt);
+    if (d === null) break;
+    delays.push(d);
+  }
+  assert.deepEqual(delays.slice(0, 5), [1000, 2000, 4000, 8000, 10000]);
+  assert.ok(delays.slice(4).every((d) => d === 10000), JSON.stringify(delays));
+  assert.equal(delays.length, 14);
+  assert.equal(delays.reduce((s, d) => s + d, 0), 115000);
+  assert.equal(MG.reconnectDelay(14), null);
+  assert.equal(MG.reconnectDelay(1000), null);
+});

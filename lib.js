@@ -273,11 +273,52 @@
     });
   }
 
+  // A playerId as the room server accepts it (rooms/rules.js).
+  const PLAYER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+  // The browser remembers its seat in each room it entered, so a reload or a reopened link
+  // comes back as the same player: localStorage[roomSeatKey(id)] = roomSeatText(seat).
+  const roomSeatKey = (id) => `mg-room:${id}`;
+
+  const roomSeatText = ({ playerId, name }) => JSON.stringify({ playerId, name: cleanName(name) });
+
+  // The stored text back as { playerId, name }, or null for anything the room would refuse
+  // (a broken playerId, no name) or that is not a seat at all: such a seat is forgotten.
+  function parseRoomSeat(text) {
+    let seat;
+    try {
+      seat = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (!seat || typeof seat !== 'object') return null;
+    const name = cleanName(seat.name);
+    if (typeof seat.playerId !== 'string' || !PLAYER_ID.test(seat.playerId) || !name) return null;
+    return { playerId: seat.playerId, name };
+  }
+
+  // How long to wait before reconnect attempt number attempt (0, 1, ...) after the room's
+  // socket dropped: 1, 2, 4, 8 s, then every 10 s, and null once the waits would pass
+  // 2 minutes in all: then the connection counts as lost.
+  const RECONNECT_FIRST_MS = [1000, 2000, 4000, 8000];
+  const RECONNECT_EVERY_MS = 10000;
+  const RECONNECT_LIMIT_MS = 120000;
+  function reconnectDelay(attempt) {
+    const delay = (i) => (i < RECONNECT_FIRST_MS.length ? RECONNECT_FIRST_MS[i] : RECONNECT_EVERY_MS);
+    let waited = 0;
+    for (let i = 0; i <= attempt; i++) {
+      waited += delay(i);
+      if (waited > RECONNECT_LIMIT_MS) return null;
+    }
+    return delay(attempt);
+  }
+
   const api = {
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
-    guessedStatus, secondsLeft, roomResultRows, roomFinalRows,
+    guessedStatus, secondsLeft, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText, parseRoomSeat,
+    reconnectDelay,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;
