@@ -36,7 +36,7 @@ fi
 
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
-cp index.html style.css lib.js app.js "$out"/
+cp index.html style.css lib.js fx.js app.js "$out"/
 cp -R data "$out"/
 MG_MAPILLARY_TOKEN="$(key monguess-mapillary)" MG_GOOGLE_API_KEY="$(key monguess-google)" python3 - "$out/config.js" <<'PY'
 import json, os, sys
