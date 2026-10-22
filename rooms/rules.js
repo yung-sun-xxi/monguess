@@ -33,9 +33,13 @@
 //                                                     than GRACE_MS ago) has guessed
 //              or { mode: 'timer', timerSec: 5-600 } the first guess starts timerSec
 //                                                     seconds for the rest
+//                 plus scoring: 'size' | 'classic', the scoring mode, kept and shown in the
+//                 lobby. Missing (a page from before scoring modes) means 'size'; any other
+//                 value refuses the room.
 //       rounds: 1-20 of { src: 'g'|'m', id, lat, lon, cc, forgiveKm }, found by the
-//               creator's browser as for a solo game; forgiveKm is lib.js
-//               forgivenessKm(places[cc]), 0-300.
+//               creator's browser as for a solo game; forgiveKm, 0-300, is what the room
+//               scores with, MG.scoreFor(km, forgiveKm): lib.js forgivenessKm(places[cc]) in a
+//               size-aware room, 0 for every round in a classic one.
 //   { type: 'join', playerId, name }   Enter the room, or come back to it.
 //   { type: 'start' }                  Lobby only; any player.
 //   { type: 'guess', round, lat, lon } round is the index the guess is for.
@@ -89,14 +93,21 @@ function validRound(r) {
     && isNum(r.forgiveKm) && r.forgiveKm >= 0 && r.forgiveKm <= MG.FORGIVE_CAP_KM;
 }
 
-function parseSettings(s) {
-  if (!s || typeof s !== 'object') return null;
+function parseTiming(s) {
   if (s.mode === 'none') return { mode: 'none', timerSec: null };
   if (s.mode === 'timer' && Number.isInteger(s.timerSec)
     && s.timerSec >= TIMER_MIN_SEC && s.timerSec <= TIMER_MAX_SEC) {
     return { mode: 'timer', timerSec: s.timerSec };
   }
   return null;
+}
+
+function parseSettings(s) {
+  if (!s || typeof s !== 'object') return null;
+  const timing = parseTiming(s);
+  const scoring = s.scoring === undefined ? 'size' : s.scoring;
+  if (!timing || (scoring !== 'size' && scoring !== 'classic')) return null;
+  return { ...timing, scoring };
 }
 
 const error = (to, code, message) => ({ to, msg: { type: 'error', code, message } });

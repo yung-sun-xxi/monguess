@@ -118,12 +118,34 @@ test('create rejects bad rounds, settings and names', () => {
     { settings: { mode: 'timer' }, rounds: PLACES },
     { settings: { mode: 'timer', timerSec: 1 }, rounds: PLACES },
     { settings: { mode: 'none' }, rounds: PLACES, name: '   ' },
+    { settings: { mode: 'none', scoring: 'flat' }, rounds: PLACES },
+    { settings: { mode: 'none', scoring: null }, rounds: PLACES },
+    { settings: { mode: 'timer', timerSec: 30, scoring: 1 }, rounds: PLACES },
   ];
   for (const b of bad) {
     const sim = new Sim();
     const out = sim.send({ type: 'create', playerId: 'a', name: 'Ann', ...b });
     assert.equal(sim.state, null, JSON.stringify(b));
     assert.equal(errors(out).length, 1, JSON.stringify(b));
+  }
+});
+
+test('create: the scoring mode is kept; a create without one (an older page) is size-aware', () => {
+  const cases = [
+    [{ mode: 'none' }, { mode: 'none', timerSec: null, scoring: 'size' }],
+    [{ mode: 'none', scoring: 'size' }, { mode: 'none', timerSec: null, scoring: 'size' }],
+    [{ mode: 'none', scoring: 'classic' }, { mode: 'none', timerSec: null, scoring: 'classic' }],
+    [{ mode: 'timer', timerSec: 30, scoring: 'classic' }, { mode: 'timer', timerSec: 30, scoring: 'classic' }],
+    [{ mode: 'timer', timerSec: 30 }, { mode: 'timer', timerSec: 30, scoring: 'size' }],
+  ];
+  for (const [settings, kept] of cases) {
+    const sim = new Sim();
+    const out = sim.send({ type: 'create', playerId: 'a', name: 'Ann', settings, rounds: PLACES });
+    assert.deepEqual(sim.state.settings, kept, JSON.stringify(settings));
+    assert.deepEqual(out.find((o) => o.msg.type === 'state').msg.settings, kept, JSON.stringify(settings));
+    // Anyone who joins later sees the same mode.
+    const joined = sim.send({ type: 'join', playerId: 'b', name: 'Bob' });
+    assert.deepEqual(joined.find((o) => o.msg.type === 'state').msg.settings, kept);
   }
 });
 
@@ -143,7 +165,7 @@ test('join with a known playerId does not add a second player', () => {
 test('a player who comes back mid-game with the same playerId keeps their points', () => {
   const sim = room();
   sim.send({ type: 'start', playerId: 'a' });
-  guess(sim, 'a', 48.85, 2.35);
+  guess(sim, 'a', 48.8566, 2.3522); // on the spot: 5000 on any curve
   sim.send({ type: 'leave', playerId: 'b' });
   sim.tick(R.GRACE_MS); // b is not waited for after the grace: the round ends
   sim.send({ type: 'join', playerId: 'a', name: 'Ann' });
@@ -345,7 +367,7 @@ test('results reveal the place and every guess; the table is sorted by total', (
   const sim = room();
   sim.send({ type: 'start', playerId: 'a' });
   guess(sim, 'a', 10, 10);
-  guess(sim, 'b', 48.85, 2.35);
+  guess(sim, 'b', 48.8566, 2.3522); // on the spot: 5000 on any curve
   const [results] = sim.sent('results');
   assert.deepEqual(results.msg.place, PLACES[0]);
   assert.deepEqual(results.msg.table.map((r) => r.playerId), ['b', 'a']);
@@ -435,9 +457,11 @@ test('points equal scoreFor(distanceKm) from lib.js with the round forgiveness r
     assert.equal(g.km, km);
     assert.equal(g.points, MG.scoreFor(km, PLACES[0].forgiveKm), `${lat},${lon}`);
   }
-  // The radius matters: Madrid is ~1050 km from Paris, so 200 km forgiven changes the score.
-  assert.notEqual(MG.scoreFor(MG.distanceKm(PLACES[0], { lat: 40.4168, lon: -3.7038 }), 200),
-    MG.scoreFor(MG.distanceKm(PLACES[0], { lat: 40.4168, lon: -3.7038 })));
+  // The spread matters: Madrid is ~1050 km from Paris, and a spread of 200 km stretches the
+  // curve to 5000 · e^(−km / (1492.7 + 400)), well above the classic score for the same miss.
+  const madrid = MG.distanceKm(PLACES[0], { lat: 40.4168, lon: -3.7038 });
+  assert.equal(MG.scoreFor(madrid, 200), Math.round(5000 * Math.exp(-madrid / 1892.7)));
+  assert.ok(MG.scoreFor(madrid, 200) - MG.scoreFor(madrid) > 300);
 });
 
 test('a guess for another round, a second guess and a bad point are refused', () => {

@@ -3,7 +3,8 @@
 const CFG = window.MG_CONFIG || {};
 // Чистые функции (очки, расстояния, ссылка для друзей) живут в lib.js: их проверяют тесты.
 const {
-  MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, forgivenessKm, formatKm,
+  MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, forgivenessKm, scoreGuess, sizeBonus, sizeBonusText,
+  describeScoring, formatKm,
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
   guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
@@ -20,17 +21,18 @@ const regionNames = new Intl.DisplayNames(['ru'], { type: 'region' });
 let places = null; // { "KE": [[lat, lon, population], ...], ... }
 // Поля лога (logId … roundsTotal) описывают текущую игру для /api/log, см. «Лог игры».
 // В комнате rounds и guesses — только сыгранные раунды и свои ответы, room — id комнаты.
+// scoring — подсчёт очков: 'size' (с учётом размера страны) или 'classic'.
 const state = {
-  rounds: [], guesses: [], index: 0,
+  rounds: [], guesses: [], index: 0, scoring: 'size',
   logId: '', startedAt: 0, buildMs: 0, settings: null, challenge: false, errors: [], finished: false,
   room: null, roundsTotal: 0,
 };
 
 // ---------- Страны и случайные точки ----------
 
-// Радиус прощения страны считается один раз на код: places не меняется за игру.
-// Страны нет в places.json — радиус 0. Пока файл не загрузился (игра по ссылке его не ждёт),
-// ноль не кэшируется.
+// Разброс страны (forgivenessKm, по нему растягивается кривая очков) считается один раз на код:
+// places не меняется за игру. Страны нет в places.json — разброс 0. Пока файл не загрузился
+// (игра по ссылке его не ждёт), ноль не кэшируется.
 const forgiveCache = new Map();
 function forgiveFor(cc) {
   if (!places) return 0;
@@ -189,7 +191,7 @@ async function generateRounds(count, sources, spheres, onProgress) {
 
 // ---------- Ссылка для друзей ----------
 
-const challengeUrl = () => `${location.origin}${location.pathname}#c=${encodeChallenge(state.rounds)}`;
+const challengeUrl = () => `${location.origin}${location.pathname}#c=${encodeChallenge(state.rounds, state.scoring)}`;
 
 // ---------- Лог игры ----------
 
@@ -203,10 +205,11 @@ function newLogId() {
 }
 
 // Новая игра: пустые раунды и свежая запись лога. settings — null для игры по ссылке
-// и для того, кто вошёл в чужую комнату. roomId и roundsTotal — только для игры в комнате.
-function beginLog(settings, roomId = null, roundsTotal = 0) {
+// и для того, кто вошёл в чужую комнату; scoring есть всегда: из меню, из ссылки или комнаты.
+// roomId и roundsTotal — только для игры в комнате.
+function beginLog(settings, scoring, roomId = null, roundsTotal = 0) {
   Object.assign(state, {
-    rounds: [], guesses: [], index: 0,
+    rounds: [], guesses: [], index: 0, scoring,
     logId: newLogId(), startedAt: Date.now(), buildMs: 0,
     settings, challenge: !settings && !roomId, errors: [], finished: false,
     room: roomId, roundsTotal,
@@ -226,6 +229,7 @@ function postLog(beacon = false) {
       name: cleanName(state.room ? room.name : $('player-name').value),
       settings: state.settings,
       challenge: state.challenge,
+      scoring: state.scoring,
       rounds: state.rounds,
       guesses: state.guesses,
       errors: state.errors,
@@ -383,9 +387,7 @@ function showResult(round, guess) {
 
   $('result-country').textContent = `${flag(round.cc)} ${countryName(round.cc)}`;
   $('result-distance').textContent = `Вы ошиблись на ${formatKm(guess.km)}`;
-  const forgiven = guess.forgiven >= 1;
-  $('result-forgiven').textContent = forgiven ? `Прощено ${formatKm(guess.forgiven)}: разброс внутри страны` : '';
-  $('result-forgiven').hidden = !forgiven;
+  showBonus(sizeBonusText(guess.bonus));
   $('result-points').textContent = `+${guess.points.toLocaleString('ru')} очков`;
   const last = state.index + 1 >= state.rounds.length;
   $('next').textContent = last ? 'Итоги' : 'Следующий раунд';
@@ -401,6 +403,12 @@ function showResult(round, guess) {
   };
   soloTick = setInterval(tick, 250);
   tick();
+}
+
+// «+N очков за размер страны» под расстоянием; пустой текст прячет строку.
+function showBonus(text) {
+  $('result-forgiven').textContent = text;
+  $('result-forgiven').hidden = !text;
 }
 
 function showFinal() {
@@ -688,6 +696,7 @@ async function createRoom() {
     name: $('player-name').value,
     mode: roomMode(),
     timerSec: $('room-timer').value,
+    scoring: $('scoring').value,
     rounds,
     forgiveKm: forgiveFor,
   }));
@@ -705,7 +714,8 @@ function showLobby() {
   show('lobby');
   $('lobby-link').value = roomLink(pageBase(), room.id);
   const n = room.roundsTotal;
-  $('lobby-info').textContent = `${n} ${pluralRu(n, 'раунд', 'раунда', 'раундов')} · ${describeRoomMode(room.settings)}`;
+  $('lobby-info').textContent = `${n} ${pluralRu(n, 'раунд', 'раунда', 'раундов')} · ${describeRoomMode(room.settings)}`
+    + ` · ${describeScoring(room.settings.scoring)}`;
   renderPlayers();
 }
 
@@ -740,7 +750,8 @@ async function showRoomRound({ index, place, endsAt, guessed }) {
   // после перезагрузки, сыграет только оставшиеся раунды: их и ждёт запись, чтобы считаться законченной.
   if (state.room !== room.id) {
     const search = room.search;
-    beginLog(search && { sources: search.sources, spheres: search.spheres, rounds: search.count }, room.id, room.roundsTotal - index);
+    beginLog(search && { sources: search.sources, spheres: search.spheres, rounds: search.count },
+      room.settings.scoring, room.id, room.roundsTotal - index);
     postLog();
   }
   state.index = index; // номер раунда для ошибок панорамы в логе
@@ -849,9 +860,8 @@ function showRoomResults(msg) {
 
   $('result-country').textContent = `${flag(place.cc)} ${countryName(place.cc)}`;
   $('result-distance').textContent = answered ? `Вы ошиблись на ${formatKm(mine.km)}` : 'Вы не ответили в этом раунде';
-  const forgiven = answered ? Math.min(place.forgiveKm, mine.km) : 0;
-  $('result-forgiven').textContent = forgiven >= 1 ? `Прощено ${formatKm(forgiven)}: разброс внутри страны` : '';
-  $('result-forgiven').hidden = forgiven < 1;
+  // В классической комнате forgiveKm каждого раунда 0, так что прибавки нет.
+  showBonus(sizeBonusText(answered ? sizeBonus(mine.km, place.forgiveKm) : 0));
   $('result-points').textContent = `+${(mine?.points ?? 0).toLocaleString('ru')} очков`;
   renderRoomResultsTable(rows);
   const last = msg.nextAt === null;
@@ -1022,7 +1032,7 @@ async function findPlaces({ sources, spheres, count }) {
 async function newGame() {
   const search = menuSearch();
   if (!search) return;
-  beginLog({ sources: search.sources, spheres: search.spheres, rounds: search.count });
+  beginLog({ sources: search.sources, spheres: search.spheres, rounds: search.count }, $('scoring').value);
   try {
     const { rounds, buildMs } = await findPlaces(search);
     state.buildMs = buildMs;
@@ -1037,8 +1047,8 @@ async function newGame() {
   }
 }
 
-async function playChallenge(rounds) {
-  beginLog(null);
+async function playChallenge({ rounds, scoring }) {
+  beginLog(null, scoring);
   // Игра по ссылке не началась: в лог одна запись без раундов, с ошибкой.
   const failChallenge = (message) => {
     logError(null, message);
@@ -1071,7 +1081,7 @@ async function init() {
   if (hasRoomLink && !roomId) $('menu-error').textContent = 'Ссылка на комнату повреждена. Попросите друга скопировать её ещё раз.';
 
   if (challenge) {
-    const n = challenge.length;
+    const n = challenge.rounds.length;
     $('challenge-note').textContent = `Друг позвал вас сыграть: ${n} ${pluralRu(n, 'раунд', 'раунда', 'раундов')}, те же места.`;
     $('challenge-note').hidden = false;
     $('landing').hidden = true;
@@ -1131,11 +1141,8 @@ async function init() {
     }
     const round = state.rounds[state.index];
     const ll = guessMarker.getLatLng();
-    const guess = { lat: ll.lat, lon: ll.lng };
-    guess.km = distanceKm(round, guess);
-    const forgive = forgiveFor(round.cc);
-    guess.points = scoreFor(guess.km, forgive);
-    guess.forgiven = Math.min(forgive, guess.km);
+    const at = { lat: ll.lat, lon: ll.lng };
+    const guess = { ...at, ...scoreGuess(round, at, forgiveFor(round.cc), state.scoring) };
     state.guesses.push(guess);
     showResult(round, guess);
   };

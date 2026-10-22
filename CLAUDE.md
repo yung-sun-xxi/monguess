@@ -44,22 +44,7 @@ authority to merge; CI (`.github/workflows/ci.yml`) runs the same script on Ubun
 - The Mapillary Graph API returns `{"data":[]}` for this app since 2026-10-19 (see
   issue #1 and the menu note). "Только Google" is first in the source list for that
   reason; re-test before planning around Mapillary.
-- The friends link `#c=` is base64 of the answers. Anyone can decode it; that is by design
-  for a friends-only game.
+- The friends link `#c=` is base64 of the answers (and of the scoring mode, for a classic
+  game). Anyone can decode it; that is by design for a friends-only game.
 - A browser smoke test of a worktree needs port 8765 free: a `scripts/play.sh` left running
   by another session holds it.
-
-## Waiting on games: issue #20
-
-Issue #20 (check the forgiveness-radius scoring against the game log) can start only once the
-log holds 5 finished games played after the deploy of `d941d99`, so it is not `ready-for-agent`.
-While it is open, the first session of the day in this repository, worktree or not, runs this
-before its own task, from the main folder, where the gitignored script lives:
-
-1. If `~/PersonalProjects/monguess/.agent/games-check.txt` already holds today's date, skip.
-2. In `~/PersonalProjects/monguess`: `scripts/logs.sh 1000 --raw > .agent/log-20.jsonl &&
-   node .agent/check-scoring.js .agent/log-20.jsonl 5`, then write today's date and the printed
-   count to `.agent/games-check.txt`.
-3. Exit 3 means fewer than 5 games: say nothing and go on with the session's task.
-4. Exit 0 means enough: tell the owner first thing, put `ready-for-agent` back on #20, and offer to
-   take it now. The PR that closes #20 removes this section.

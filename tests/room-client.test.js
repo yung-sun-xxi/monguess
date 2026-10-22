@@ -43,13 +43,13 @@ const ROUNDS = [
 test('buildRoomCreate: no-timer mode, rounds carry forgiveKm and only the protocol fields', () => {
   const forgive = { ES: 120.5, AU: 300 };
   const msg = MG.buildRoomCreate({
-    playerId: 'p1', name: '  Ann  ', mode: 'none', timerSec: '30', rounds: ROUNDS, forgiveKm: (cc) => forgive[cc],
+    playerId: 'p1', name: '  Ann  ', mode: 'none', timerSec: '30', scoring: 'size', rounds: ROUNDS, forgiveKm: (cc) => forgive[cc],
   });
   assert.deepEqual(msg, {
     type: 'create',
     playerId: 'p1',
     name: 'Ann',
-    settings: { mode: 'none' },
+    settings: { mode: 'none', scoring: 'size' },
     rounds: [
       { src: 'g', id: 'pano-es', lat: 41.3874, lon: 2.1686, cc: 'ES', forgiveKm: 120.5 },
       { src: 'm', id: '4471234', lat: -33.8688, lon: 151.2093, cc: 'AU', forgiveKm: 300 },
@@ -58,27 +58,64 @@ test('buildRoomCreate: no-timer mode, rounds carry forgiveKm and only the protoc
 });
 
 test('buildRoomCreate: timer mode carries its seconds as a number', () => {
-  const msg = MG.buildRoomCreate({ playerId: 'p1', name: 'Ann', mode: 'timer', timerSec: '60', rounds: ROUNDS, forgiveKm: () => 0 });
-  assert.deepEqual(msg.settings, { mode: 'timer', timerSec: 60 });
+  const msg = MG.buildRoomCreate({ playerId: 'p1', name: 'Ann', mode: 'timer', timerSec: '60', scoring: 'size', rounds: ROUNDS, forgiveKm: () => 0 });
+  assert.deepEqual(msg.settings, { mode: 'timer', timerSec: 60, scoring: 'size' });
+});
+
+test('buildRoomCreate: a classic room sends forgiveKm 0 for every round and says so in settings', () => {
+  for (const mode of ['none', 'timer']) {
+    const msg = MG.buildRoomCreate({
+      playerId: 'p1', name: 'Ann', mode, timerSec: '30', scoring: 'classic', rounds: ROUNDS, forgiveKm: () => 300,
+    });
+    assert.equal(msg.settings.scoring, 'classic', mode);
+    assert.deepEqual(msg.rounds.map((r) => r.forgiveKm), [0, 0], mode);
+  }
+  // No mode given is the default, size-aware.
+  const plain = MG.buildRoomCreate({ playerId: 'p1', name: 'Ann', mode: 'none', timerSec: '30', rounds: ROUNDS, forgiveKm: () => 300 });
+  assert.equal(plain.settings.scoring, 'size');
+  assert.deepEqual(plain.rounds.map((r) => r.forgiveKm), [300, 300]);
 });
 
 test('buildRoomCreate: the room rules accept the message as a room in the lobby', () => {
   for (const [mode, timerSec] of [['none', '30'], ['timer', '15'], ['timer', '120']]) {
     const msg = MG.buildRoomCreate({
-      playerId: 'p1', name: 'Ann', mode, timerSec, rounds: ROUNDS, forgiveKm: (cc) => MG.forgivenessKm(places[cc]),
+      playerId: 'p1', name: 'Ann', mode, timerSec, scoring: 'size', rounds: ROUNDS, forgiveKm: (cc) => MG.forgivenessKm(places[cc]),
     });
     const { state, out } = R.step(null, msg, 1_800_000_000_000);
     assert.ok(state, `${mode} ${timerSec}: ${JSON.stringify(out)}`);
     assert.equal(state.phase, 'lobby');
+    assert.equal(state.settings.scoring, 'size');
     assert.equal(state.rounds[1].forgiveKm, 300);
     assert.equal(state.rounds[0].forgiveKm, MG.forgivenessKm(places.ES));
   }
+});
+
+test('buildRoomCreate: a classic room scores a guess on the classic curve, end to end', () => {
+  const msg = MG.buildRoomCreate({
+    playerId: 'p1', name: 'Ann', mode: 'none', timerSec: '30', scoring: 'classic', rounds: ROUNDS,
+    forgiveKm: (cc) => MG.forgivenessKm(places[cc]),
+  });
+  const t = 1_800_000_000_000;
+  let { state, out } = R.step(null, msg, t);
+  assert.equal(out.find((o) => o.msg.type === 'state').msg.settings.scoring, 'classic');
+  state = R.step(state, { type: 'start', playerId: 'p1' }, t).state;
+  // Barcelona's round, guessed in Madrid: Spain's spread, which classic ignores, would add points.
+  ({ out } = R.step(state, { type: 'guess', playerId: 'p1', round: 0, lat: 40.4168, lon: -3.7038 }, t));
+  const g = out.find((o) => o.msg.type === 'results').msg.guesses[0];
+  assert.equal(g.points, MG.scoreFor(g.km, 0));
+  assert.notEqual(g.points, MG.scoreFor(g.km, MG.forgivenessKm(places.ES)));
 });
 
 test('describeRoomMode: the room mode in words', () => {
   assert.equal(MG.describeRoomMode({ mode: 'none', timerSec: null }), 'Без времени — раунд идёт, пока все не ответят');
   assert.equal(MG.describeRoomMode({ mode: 'timer', timerSec: 30 }), 'Таймер: 30 секунд после первого ответа');
   assert.equal(MG.describeRoomMode({ mode: 'timer', timerSec: 21 }), 'Таймер: 21 секунда после первого ответа');
+});
+
+test('describeScoring: the lobby says how the room scores; a room from before #39 is size-aware', () => {
+  assert.equal(MG.describeScoring({ mode: 'none', timerSec: null, scoring: 'classic' }.scoring),
+    'Подсчёт очков: классический, как в GeoGuessr');
+  assert.equal(MG.describeScoring({ mode: 'none', timerSec: null }.scoring), 'Подсчёт очков: с учётом размера страны');
 });
 
 test('pluralRu: Russian plural forms by the last digits', () => {
