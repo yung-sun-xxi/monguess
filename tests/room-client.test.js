@@ -191,6 +191,9 @@ test('roomSeatText and parseRoomSeat: a seat survives the round trip, the name c
   assert.deepEqual(MG.parseRoomSeat(text), { playerId: 'ab12_-XY', name: 'Боб' });
   assert.deepEqual(MG.parseRoomSeat(JSON.stringify({ playerId: 'p'.repeat(64), name: 'A', more: true })),
     { playerId: 'p'.repeat(64), name: 'A' });
+  // Text written by hand or by an older page: the name comes back cleaned, as the room cleans it.
+  assert.deepEqual(MG.parseRoomSeat(JSON.stringify({ playerId: 'p1', name: `  ${'Я'.repeat(25)} ` })),
+    { playerId: 'p1', name: 'Я'.repeat(20) });
 });
 
 test('parseRoomSeat: null for anything the room would refuse or that is not a seat', () => {
