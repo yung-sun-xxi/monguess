@@ -437,6 +437,16 @@ async function prewarm(id, current, box) {
   }
 }
 
+// Первый раунд Mapillary грузится заранее, пока виден экран загрузки (#pano скрыт, его размер 0 —
+// берём окно). Ждём, пока снимок покажется, но не дольше FIRST_ROUND_WAIT_MS; ошибок не бросает.
+const FIRST_ROUND_WAIT_MS = 4000;
+async function warmFirstRound(rounds) {
+  const id = prewarmId(rounds, -1);
+  if (!id) return;
+  await prewarm(id, () => !$('loading').hidden, { width: innerWidth, height: innerHeight });
+  if (prewarmed?.id === id) await Promise.race([prewarmed.loaded, sleep(FIRST_ROUND_WAIT_MS)]);
+}
+
 // nextId — раунд, который загрузить заранее, когда этот покажется (своя игра, см. prewarmId);
 // null — ничего не грузить (комната, последний раунд, дальше Google).
 async function showPanorama(round, nextId = null) {
@@ -1306,6 +1316,7 @@ async function newGame() {
   try {
     const { rounds, buildMs } = await findPlaces(search);
     state.buildMs = buildMs;
+    await warmFirstRound(rounds);
     play(rounds);
     // Ссылка на игру сразу в адресе: перезагрузка не теряет места, а скопировать её можно и в середине игры.
     history.replaceState(null, '', challengeUrl());
@@ -1336,6 +1347,12 @@ async function playChallenge({ rounds, scoring }) {
       failChallenge('В этой игре есть панорамы Google, а ключа Google здесь нет.');
       return;
     }
+  }
+  // Первый раунд Mapillary — под экраном загрузки, как в своей игре.
+  if (prewarmId(rounds, -1)) {
+    show('loading');
+    $('loading-text').textContent = 'Загрузка…';
+    await warmFirstRound(rounds);
   }
   play(rounds);
 }
