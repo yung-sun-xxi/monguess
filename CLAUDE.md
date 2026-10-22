@@ -21,9 +21,11 @@ authority to merge; CI (`.github/workflows/ci.yml`) runs the same script on Ubun
   the Google key allows only `http://localhost:8765/*` and `https://monguess.pages.dev/*`.
   A session can serve a worktree the same way through `.claude/launch.json` (gitignored;
   a copy lives in the main folder) and the app's preview tools.
-- `scripts/deploy.sh` publishes to Cloudflare Pages project `monguess`
-  (https://monguess.pages.dev) and refuses anything but a clean `master` that matches
-  `origin/master`. Keychain: `monguess-cloudflare`, `monguess-cloudflare-account`.
+- `scripts/deploy.sh` deploys the rooms Worker `monguess-rooms` (`rooms/`), then publishes
+  to Cloudflare Pages project `monguess` (https://monguess.pages.dev), and refuses anything
+  but a clean `master` that matches `origin/master`. Keychain: `monguess-cloudflare`,
+  `monguess-cloudflare-account`. After a deploy, `node scripts/room-smoke.js
+  https://monguess.pages.dev` proves the rooms are live.
 - After every update, open the game in Safari for the owner without being asked: after a
   deploy, `open -a Safari https://monguess.pages.dev`; when a change waits on his by-eye
   "ok" before merge, serve the branch on port 8765 and `open -a Safari http://localhost:8765`.
