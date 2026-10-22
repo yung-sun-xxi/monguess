@@ -324,12 +324,209 @@
     return delay(attempt);
   }
 
+  // ---------- Mapillary vector tiles ----------
+  // Mapillary's image search is unusable for boxes over ~600 m, so images are found through its
+  // vector tiles: Mapbox Vector Tiles (protobuf), decoded here by hand without dependencies.
+
+  // The slippy-map tile [x, y] at zoom z that holds the point (Web Mercator).
+  function tileAt(lat, lon, z) {
+    const n = 2 ** z;
+    const clamp = (v) => Math.max(0, Math.min(n - 1, Math.floor(v)));
+    const r = (Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI) / 180;
+    return [clamp(((lon + 180) / 360) * n), clamp(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n)];
+  }
+
+  // The up to 8 tiles around [x, y]: x wraps at the antimeridian, rows past the poles are skipped.
+  function tileNeighbours(x, y, z) {
+    const n = 2 ** z;
+    const out = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if ((dx || dy) && y + dy >= 0 && y + dy < n) out.push([(x + dx + n) % n, y + dy]);
+      }
+    }
+    return out;
+  }
+
+  // A point inside tile [x, y] at zoom z, in tile units 0..extent, as { lat, lon }.
+  function tilePointToLatLon(z, x, y, px, py, extent) {
+    const n = 2 ** z;
+    const lon = ((x + px / extent) / n) * 360 - 180;
+    const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + py / extent)) / n))) * 180) / Math.PI;
+    return { lat, lon };
+  }
+
+  const utf8 = new TextDecoder();
+
+  // A minimal protobuf reader over a Uint8Array.
+  function pbReader(buf, pos = 0, end = buf.length) {
+    const r = {
+      pos,
+      end,
+      // Exact up to 2^53, which covers every tag, length, count and geometry value.
+      varint() {
+        let v = 0;
+        let mul = 1;
+        let b;
+        do {
+          b = buf[r.pos++];
+          v += (b & 0x7f) * mul;
+          mul *= 128;
+        } while (b & 0x80);
+        return v;
+      },
+      bigVarint() {
+        let v = 0n;
+        let shift = 0n;
+        let b;
+        do {
+          b = buf[r.pos++];
+          v |= BigInt(b & 0x7f) << shift;
+          shift += 7n;
+        } while (b & 0x80);
+        return v;
+      },
+      sub() {
+        const len = r.varint();
+        r.pos += len;
+        return pbReader(buf, r.pos - len, r.pos);
+      },
+      skip(wire) {
+        if (wire === 0) r.varint();
+        else if (wire === 1) r.pos += 8;
+        else if (wire === 2) r.pos += r.varint();
+        else if (wire === 5) r.pos += 4;
+        else throw new Error(`protobuf: wire type ${wire}`);
+      },
+      str() {
+        const len = r.varint();
+        r.pos += len;
+        return utf8.decode(buf.subarray(r.pos - len, r.pos));
+      },
+      f32() {
+        r.pos += 4;
+        return new DataView(buf.buffer, buf.byteOffset + r.pos - 4, 4).getFloat32(0, true);
+      },
+      f64() {
+        r.pos += 8;
+        return new DataView(buf.buffer, buf.byteOffset + r.pos - 8, 8).getFloat64(0, true);
+      },
+    };
+    return r;
+  }
+
+  // A 64-bit integer as a Number while that is exact, else as its decimal string.
+  const int64 = (v) => (v >= -BigInt(Number.MAX_SAFE_INTEGER) && v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : String(v));
+
+  function mvtValue(r) {
+    let v = null;
+    while (r.pos < r.end) {
+      const tag = r.varint();
+      const field = tag >> 3;
+      if (field === 1) v = r.str();
+      else if (field === 2) v = r.f32();
+      else if (field === 3) v = r.f64();
+      else if (field === 4) v = int64(BigInt.asIntN(64, r.bigVarint()));
+      else if (field === 5) v = int64(r.bigVarint());
+      else if (field === 6) { const u = r.bigVarint(); v = int64((u >> 1n) ^ -(u & 1n)); }
+      else if (field === 7) v = r.varint() !== 0;
+      else r.skip(tag & 7);
+    }
+    return v;
+  }
+
+  // The points of an MVT geometry, in tile units: the MoveTo/LineTo vertices, ClosePath ignored.
+  function mvtPoints(r) {
+    const pts = [];
+    let px = 0;
+    let py = 0;
+    const zz = (n) => (n % 2 ? -(n + 1) / 2 : n / 2);
+    while (r.pos < r.end) {
+      const cmd = r.varint();
+      const id = cmd & 7;
+      const count = Math.floor(cmd / 8);
+      if (id === 7) continue;
+      for (let i = 0; i < count; i++) {
+        px += zz(r.varint());
+        py += zz(r.varint());
+        pts.push([px, py]);
+      }
+    }
+    return pts;
+  }
+
+  // One layer of a vector tile: { extent, features: [{ id, props, points }] }, or null when the
+  // tile has no layer of that name. A feature's id is a decimal string (it may pass 2^53).
+  function decodeMvtLayer(bytes, name) {
+    const tile = pbReader(bytes);
+    while (tile.pos < tile.end) {
+      const tag = tile.varint();
+      if (tag >> 3 !== 3 || (tag & 7) !== 2) { tile.skip(tag & 7); continue; }
+      const r = tile.sub();
+      let layerName = null;
+      let extent = 4096;
+      const keys = [];
+      const values = [];
+      const raw = [];
+      while (r.pos < r.end) {
+        const t = r.varint();
+        const field = t >> 3;
+        if (field === 1) layerName = r.str();
+        else if (field === 2) raw.push(r.sub());
+        else if (field === 3) keys.push(r.str());
+        else if (field === 4) values.push(mvtValue(r.sub()));
+        else if (field === 5) extent = r.varint();
+        else r.skip(t & 7);
+      }
+      if (layerName !== name) continue;
+      const features = raw.map((f) => {
+        const feature = { id: null, props: {}, points: [] };
+        while (f.pos < f.end) {
+          const t = f.varint();
+          const field = t >> 3;
+          if (field === 1) feature.id = String(f.bigVarint());
+          else if (field === 2) {
+            const s = f.sub();
+            while (s.pos < s.end) {
+              const k = s.varint();
+              feature.props[keys[k]] = values[s.varint()];
+            }
+          } else if (field === 4) feature.points = mvtPoints(f.sub());
+          else f.skip(t & 7);
+        }
+        return feature;
+      });
+      return { extent, features };
+    }
+    return null;
+  }
+
+  // Mapillary images of tile [x, y] at zoom z: [{ id, pano, lat, lon }], id a decimal string.
+  function mapillaryImages(bytes, z, x, y) {
+    const layer = decodeMvtLayer(bytes, 'image');
+    if (!layer) return [];
+    return layer.features.filter((f) => f.points.length && (f.props.id ?? f.id) != null).map((f) => {
+      const [px, py] = f.points[0];
+      return { id: String(f.props.id ?? f.id), pano: f.props.is_pano === true, ...tilePointToLatLon(z, x, y, px, py, layer.extent) };
+    });
+  }
+
+  // A random panorama if there is one, else any image, as a round's place; null for none.
+  function pickMapillaryImage(images, random = Math.random) {
+    if (!images.length) return null;
+    const panos = images.filter((i) => i.pano);
+    const pool = panos.length ? panos : images;
+    const img = pool[Math.floor(random() * pool.length)];
+    return { src: 'm', id: img.id, lat: img.lat, lon: img.lon, kind: 'mapillary' };
+  }
+
   const api = {
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
     guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
-    parseRoomSeat, reconnectDelay,
+    parseRoomSeat, reconnectDelay, tileAt, tileNeighbours, tilePointToLatLon, decodeMvtLayer, mapillaryImages,
+    pickMapillaryImage,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;
