@@ -138,14 +138,14 @@ async function mapillaryTile([x, y]) {
 
 async function tryMapillary(lat, lon) {
   const tile = MG.tileAt(lat, lon, MAPILLARY_Z);
-  let images = await mapillaryTile(tile);
+  const images = await mapillaryTile(tile);
   if (!images) return null;
-  // В пустом тайле смотрим 8 соседних: выходит примерно прежний радиус поиска в ~9 км.
-  if (!images.length) {
-    const near = await Promise.all(MG.tileNeighbours(...tile, MAPILLARY_Z).map(mapillaryTile));
-    images = near.flatMap((imgs) => imgs || []);
-  }
-  return MG.pickMapillaryImage(images);
+  const own = MG.pickMapillaryImage(images);
+  if (own) return own;
+  // В своём тайле нет годной панорамы (пусто, только плоские фото или низкое качество):
+  // смотрим 8 соседних, выходит примерно прежний радиус поиска в ~9 км.
+  const near = await Promise.all(MG.tileNeighbours(...tile, MAPILLARY_Z).map(mapillaryTile));
+  return MG.pickMapillaryImage(near.flatMap((imgs) => imgs || []));
 }
 
 async function findAt([lat, lon], sources, spheres) {
