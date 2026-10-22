@@ -271,3 +271,9 @@ test('prewarmId: the next round\'s id when it is Mapillary, else null', () => {
   // No rounds (the game was left): nothing.
   assert.equal(MG.prewarmId([], 0), null);
 });
+
+test('prewarmId: index -1 gives the first round, loaded behind the loading screen', () => {
+  assert.equal(MG.prewarmId([mRound('11'), gRound('bb')], -1), '11');
+  assert.equal(MG.prewarmId([gRound('aa'), mRound('22')], -1), null);
+  assert.equal(MG.prewarmId([], -1), null);
+});
