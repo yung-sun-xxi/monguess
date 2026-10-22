@@ -150,8 +150,11 @@
   // The record app.js posts to /api/log, one per game. Rounds keep how the imagery was found
   // (kind: Google's own, a person's photosphere, Mapillary); a friends link does not carry it,
   // so its rounds have kind null, and its settings were the friend's, so settings are null.
+  // A room game carries its room id in room (null otherwise). A room reveals its places one
+  // round at a time, so its rounds are only the ones played so far; roundsTotal, the room's
+  // count, decides whether it was played to the end. Without it the rounds are the whole game.
   // Only the fields listed here leave the browser.
-  function buildLogRecord({ id, startedAt, buildMs, name, settings, challenge, rounds, guesses, errors }) {
+  function buildLogRecord({ id, startedAt, buildMs, name, settings, challenge, rounds, guesses, errors, room, roundsTotal }) {
     rounds = rounds || [];
     guesses = guesses || [];
     return {
@@ -170,8 +173,9 @@
       })),
       guesses: guesses.map((g) => ({ lat: g.lat, lon: g.lon, km: g.km, points: g.points })),
       total: guesses.reduce((s, g) => s + g.points, 0),
-      finished: rounds.length > 0 && guesses.length >= rounds.length,
+      finished: rounds.length > 0 && guesses.length >= Math.max(rounds.length, roundsTotal || 0),
       errors: (errors || []).map((e) => ({ round: e.round, message: String(e.message) })),
+      room: room || null,
     };
   }
 
@@ -227,10 +231,53 @@
     return `Таймер: ${n} ${pluralRu(n, 'секунда', 'секунды', 'секунд')} после первого ответа`;
   }
 
+  // "Ответили 2 из 3" while a room round waits. Only connected players count: someone who
+  // left is not waited for (the room does not wait for them either).
+  function guessedStatus(players) {
+    const here = players.filter((p) => p.connected);
+    return `Ответили ${here.filter((p) => p.guessed).length} из ${here.length}`;
+  }
+
+  // Whole seconds from now to a room deadline (endsAt, nextAt), rounded up; 0 once it passed.
+  const secondsLeft = (at, now) => Math.max(0, Math.ceil((at - now) / 1000));
+
+  // The rows of a round's results table, from the room's 'results' message: every player of
+  // the table in its order (best total first), with their guess (lat, lon null without one),
+  // its distance in words, this round's points and the running total. you: the player whose
+  // screen this is.
+  function roomResultRows({ guesses, table }, you) {
+    const byId = new Map(guesses.map((g) => [g.playerId, g]));
+    return table.map((row) => {
+      const g = byId.get(row.playerId);
+      const has = Boolean(g) && g.lat !== null;
+      return {
+        playerId: row.playerId,
+        name: row.name,
+        lat: has ? g.lat : null,
+        lon: has ? g.lon : null,
+        distance: has ? formatKm(g.km) : 'нет ответа',
+        points: g ? g.points : 0,
+        total: row.total,
+        you: row.playerId === you,
+      };
+    });
+  }
+
+  // The room's final table: place (equal totals share one, then the count goes on: 1, 2, 2, 4),
+  // name, points per round and total, in the table's order.
+  function roomFinalRows(table, you) {
+    let place = 0;
+    return table.map((row, i) => {
+      if (i === 0 || row.total !== table[i - 1].total) place = i + 1;
+      return { place, name: row.name, points: row.points.slice(), total: row.total, you: row.playerId === you };
+    });
+  }
+
   const api = {
     MAX_POINTS, FORGIVE_CAP_KM, flag, shuffle, pickPlace, randomPointNear, distanceKm, scoreFor, forgivenessKm,
     formatKm, resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
     pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
+    guessedStatus, secondsLeft, roomResultRows, roomFinalRows,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.MG = api;

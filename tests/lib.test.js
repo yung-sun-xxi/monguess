@@ -213,6 +213,7 @@ test('buildLogRecord: a finished game with a name, every field', () => {
     total: 11645,
     finished: true,
     errors: [],
+    room: null,
   });
 });
 
@@ -270,6 +271,28 @@ test('buildLogRecord: errors are carried through, extra fields are dropped', () 
   assert.deepEqual(Object.keys(rec.rounds[0]), ['src', 'id', 'cc', 'lat', 'lon', 'kind']);
   assert.deepEqual(Object.keys(rec.guesses[0]), ['lat', 'lon', 'km', 'points']);
   assert.deepEqual(MG.buildLogRecord({ ...LOG_GAME, errors: undefined }).errors, []);
+});
+
+test('buildLogRecord: a room game is marked with its room id and is not a challenge', () => {
+  const rec = MG.buildLogRecord({ ...LOG_GAME, settings: null, challenge: false, room: 'k3x9a0bq7z', roundsTotal: 3 });
+  assert.equal(rec.room, 'k3x9a0bq7z');
+  assert.equal(rec.challenge, false);
+  assert.equal(rec.settings, null);
+  assert.equal(rec.finished, true);
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, room: '' }).room, null);
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, room: undefined }).room, null);
+});
+
+test('buildLogRecord: a room game is finished only when every round of the room was played', () => {
+  // A room reveals its places one by one: two played of three is not finished, even though
+  // every revealed round has its guess.
+  const two = { ...LOG_GAME, room: 'abc', rounds: LOG_ROUNDS.slice(0, 2), guesses: LOG_GUESSES.slice(0, 2) };
+  assert.equal(MG.buildLogRecord({ ...two, roundsTotal: 3 }).finished, false);
+  assert.equal(MG.buildLogRecord({ ...two, roundsTotal: 2 }).finished, true);
+  assert.equal(MG.buildLogRecord({ ...LOG_GAME, room: 'abc', rounds: [], guesses: [], roundsTotal: 3 }).finished, false);
+  // Without roundsTotal (a solo game) the rounds themselves are the whole game, as before.
+  assert.equal(MG.buildLogRecord(two).finished, true);
+  assert.equal(Object.keys(MG.buildLogRecord({ ...two, roundsTotal: 3 })).includes('roundsTotal'), false);
 });
 
 const NAME_REQUIRED = 'Введите имя, чтобы начать игру.';
