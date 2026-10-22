@@ -68,9 +68,10 @@ scripts/verify.sh
 scripts/deploy.sh
 ```
 
+Скрипт сначала выкладывает Worker комнат `monguess-rooms` (папка `rooms/`), потом сайт.
 Ключи берутся из Связки ключей (плюс `monguess-cloudflare` — токен с правами
-«Cloudflare Pages: Edit» и «Workers KV Storage: Edit», и `monguess-cloudflare-account` — ID
-аккаунта) и попадают только в выкладываемую копию `config.js`. У ключа Google в ограничениях должен быть адрес
+«Cloudflare Pages: Edit», «Workers KV Storage: Edit» и «Workers Scripts: Edit», и
+`monguess-cloudflare-account` — ID аккаунта) и попадают только в выкладываемую копию `config.js`. У ключа Google в ограничениях должен быть адрес
 `https://monguess.pages.dev/*`. Скрипт выкладывает только чистый `master`, совпадающий с GitHub.
 
 ## Лог игр
@@ -107,7 +108,10 @@ scripts/logs.sh --raw  # записи как есть, JSON
 
 - `index.html`, `style.css`, `lib.js`, `app.js` — вся игра, без сборки. В `lib.js` чистые функции
   (очки, расстояния, ссылка для друзей, запись лога), их проверяют тесты в `tests/`.
-- `functions/api/log.js` — приём лога игр на Cloudflare Pages, `wrangler.toml` — его привязка к KV.
+- `functions/api/log.js` — приём лога игр на Cloudflare Pages, `wrangler.toml` — его привязки.
+- `rooms/` — отдельный Worker `monguess-rooms` с Durable Object `Room`: одна живая комната на
+  объект. Сайт ходит в него через `functions/api/room/[id].js` (WebSocket `/api/room/<id>`).
+  Проверка на выложенном сайте: `node scripts/room-smoke.js https://monguess.pages.dev`.
 - `data/places.json` — ~7300 городов по странам из [Natural Earth](https://www.naturalearthdata.com)
   (общественное достояние). Случайная точка берётся в 1–40 км от случайного города страны.
 - Страна снимка определяется через Nominatim (OpenStreetMap).
