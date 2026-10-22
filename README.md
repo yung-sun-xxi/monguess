@@ -111,7 +111,9 @@ scripts/logs.sh --raw  # записи как есть, JSON
 - `functions/api/log.js` — приём лога игр на Cloudflare Pages, `wrangler.toml` — его привязки.
 - `rooms/` — отдельный Worker `monguess-rooms` с Durable Object `Room`: одна живая комната на
   объект. Сайт ходит в него через `functions/api/room/[id].js` (WebSocket `/api/room/<id>`).
-  Проверка на выложенном сайте: `node scripts/room-smoke.js https://monguess.pages.dev`.
+  Правила комнаты и протокол сообщений — в `rooms/rules.js` (чистые функции, тесты в
+  `tests/rooms.test.js`). Проверка на выложенном сайте — партия двух игроков:
+  `node scripts/room-smoke.js https://monguess.pages.dev`.
 - `data/places.json` — ~7300 городов по странам из [Natural Earth](https://www.naturalearthdata.com)
   (общественное достояние). Случайная точка берётся в 1–40 км от случайного города страны.
 - Страна снимка определяется через Nominatim (OpenStreetMap).
