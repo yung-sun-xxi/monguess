@@ -34,16 +34,17 @@ authority to merge; CI (`.github/workflows/ci.yml`) runs the same script on Ubun
 
 - GitHub `yung-sun-xxi/monguess`, private, default branch `master`.
 - Google key: GCP project "Claude MCP" (`claude-mcp-19158`), Maps JavaScript API only.
-- Mapillary app id `30592537330350355`.
+- Mapillary app id `28579063211766158` (READ only). The first app, `30592537330350355`, is
+  broken on Mapillary's side: valid token, yet every image read is empty or subcode 33.
 
 ## Traps
 
 - On localhost, Google user photospheres often come back black (HTTP 429 from
   `lh3.googleusercontent.com` for tiles); Google's own imagery renders fine. Judge
   photospheres on https://monguess.pages.dev, not locally.
-- The Mapillary Graph API returns `{"data":[]}` for this app since 2026-10-19 (see
-  issue #1 and the menu note). "Только Google" is first in the source list for that
-  reason; re-test before planning around Mapillary.
+- Mapillary Graph `/images?bbox` search fails on boxes larger than about 0.006°
+  (HTTP 500 or a 30-40 s wait, measured 2026-10-22), so places are found through z14
+  vector tiles; the Graph API is used only to open one image by id.
 - The friends link `#c=` is base64 of the answers. Anyone can decode it; that is by design
   for a friends-only game.
 - A browser smoke test of a worktree needs port 8765 free: a `scripts/play.sh` left running
