@@ -6,8 +6,8 @@ const {
   MAX_POINTS, flag, shuffle, randomPointNear, distanceKm, scoreFor, forgivenessKm, formatKm,
   resolveCountry, encodeChallenge, decodeChallenge, cleanName, nameError, formatResult, buildLogRecord,
   pluralRu, idFromBytes, roomIdFromHash, roomLink, roomSocketUrl, buildRoomCreate, describeRoomMode,
-  guessedStatus, secondsLeft, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText, parseRoomSeat,
-  reconnectDelay,
+  guessedStatus, secondsLeft, RESULTS_MS, nextRoundText, roomResultRows, roomFinalRows, roomSeatKey, roomSeatText,
+  parseRoomSeat, reconnectDelay,
 } = window.MG;
 // Сколько случайных точек пробуем в стране, прежде чем перейти к следующей.
 const POINTS_PER_BATCH = 4;
@@ -331,6 +331,7 @@ function resetGuessMap() {
 }
 
 async function startRound() {
+  stopSoloNext();
   const round = state.rounds[state.index];
   show('game');
   $('hud-round').textContent = `Раунд ${state.index + 1} / ${state.rounds.length}`;
@@ -353,6 +354,23 @@ function freshResultMap() {
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(resultMap);
 }
 
+// Отсчёт до следующего раунда своей игры (и игры по ссылке друга); null, когда его нет.
+let soloTick = null;
+
+function stopSoloNext() {
+  clearInterval(soloTick);
+  soloTick = null;
+}
+
+// Следующий раунд своей игры или итоги после последнего: по кнопке и по концу отсчёта.
+// Отсчёт останавливается первым, так что раунд не начнётся дважды.
+function nextRound() {
+  stopSoloNext();
+  state.index++;
+  if (state.index < state.rounds.length) startRound();
+  else showFinal();
+}
+
 function showResult(round, guess) {
   show('result');
   freshResultMap();
@@ -369,10 +387,24 @@ function showResult(round, guess) {
   $('result-forgiven').textContent = forgiven ? `Прощено ${formatKm(guess.forgiven)}: разброс внутри страны` : '';
   $('result-forgiven').hidden = !forgiven;
   $('result-points').textContent = `+${guess.points.toLocaleString('ru')} очков`;
-  $('next').textContent = state.index + 1 < state.rounds.length ? 'Следующий раунд' : 'Итоги';
+  const last = state.index + 1 >= state.rounds.length;
+  $('next').textContent = last ? 'Итоги' : 'Следующий раунд';
+  $('room-next').hidden = last;
+  stopSoloNext();
+  if (last) return;
+  // Как в комнате: через RESULTS_MS следующий раунд начнётся сам, кнопка начинает его сразу.
+  const at = Date.now() + RESULTS_MS;
+  const tick = () => {
+    const now = Date.now();
+    $('room-next').textContent = nextRoundText(at, now);
+    if (now >= at) nextRound();
+  };
+  soloTick = setInterval(tick, 250);
+  tick();
 }
 
 function showFinal() {
+  stopSoloNext();
   state.finished = true;
   postLog();
   show('final');
@@ -785,8 +817,7 @@ function roomTick() {
     $('hud-timer').classList.toggle('urgent', left <= 5);
   }
   if (room.phase === 'results' && room.nextAt !== null) {
-    const left = secondsLeft(room.nextAt, now);
-    $('room-next').textContent = left ? `Следующий раунд через ${left}…` : 'Следующий раунд…';
+    $('room-next').textContent = nextRoundText(room.nextAt, now);
   }
 }
 
@@ -1113,9 +1144,7 @@ async function init() {
       showRoomFinal();
       return;
     }
-    state.index++;
-    if (state.index < state.rounds.length) startRound();
-    else showFinal();
+    nextRound();
   };
   $('copy-link').onclick = () => copy(challengeUrl(), 'Ссылка скопирована — отправьте её друзьям.');
   $('copy-result').onclick = () => copy(resultText(), 'Результат скопирован.');
